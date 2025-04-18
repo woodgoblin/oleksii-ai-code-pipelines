@@ -5,6 +5,7 @@ import asyncio
 import os
 import sys
 import logging
+import argparse
 from dotenv import load_dotenv
 from google.adk.runners import Runner
 from google.adk.sessions import InMemorySessionService
@@ -31,6 +32,7 @@ sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '..')
 
 # Import the root agent from our package
 from cursor_prompt_preprocessor import root_agent
+from cursor_prompt_preprocessor.agent import set_target_directory, set_global_session
 
 # Setup constants
 APP_NAME = "cursor_prompt_preprocessor"
@@ -40,6 +42,9 @@ SESSION_ID = "demo_session"
 # Create session service and session
 session_service = InMemorySessionService()
 session = session_service.create_session(app_name=APP_NAME, user_id=USER_ID, session_id=SESSION_ID)
+
+# Set the global session for the agent module
+set_global_session(session)
 
 # Create runner with the root agent
 runner = Runner(agent=root_agent, app_name=APP_NAME, session_service=session_service)
@@ -106,10 +111,39 @@ async def run_with_retry(prompt, max_retries=3, initial_delay=1, backoff_factor=
                 logger.error(f"Error after {retry_count-1} retries: {error_message}")
                 raise
 
-async def simple_demo():
-    """Run a simple demonstration with manual retry logic."""
+async def set_directory_in_state(target_dir):
+    """Set the target directory in the agent state."""
+    from google.genai import types
+    
+    # Create a message to call the set_target_directory function
+    message = f"Process the following directory: {target_dir}"
+    content = types.Content(role='user', parts=[types.Part(text=message)])
+    
+    # This will just trigger the agent to store the directory
+    async for event in runner.run_async(user_id=USER_ID, session_id=SESSION_ID, new_message=content):
+        # We just need to run this to set up the state
+        pass
+    
+    # Manually set the target directory in the session state
+    session.state["target_directory"] = target_dir
+    logger.info(f"Set target directory in state: {target_dir}")
+
+async def simple_demo(target_dir=None):
+    """Run a simple demonstration with manual retry logic.
+    
+    Args:
+        target_dir: Optional target directory to analyze. If None, current directory is used.
+    """
     print("=== Simple Resilient Demo ===")
     print("This demo implements manual retry logic for rate limits")
+    
+    # Set the target directory if provided
+    if target_dir:
+        print(f"\nUsing target directory: {target_dir}")
+        await set_directory_in_state(target_dir)
+    else:
+        print("\nUsing current directory for analysis")
+        await set_directory_in_state(os.getcwd())
     
     # Get user prompt
     prompt = input("\nEnter your coding prompt (or press Enter for a sample prompt): ")
@@ -145,5 +179,17 @@ async def simple_demo():
         print("\nDebug information:")
         print(f"Session state keys: {list(session.state.keys())}")
 
+def parse_arguments():
+    """Parse command line arguments."""
+    parser = argparse.ArgumentParser(description="Cursor Prompt Preprocessor Demo")
+    parser.add_argument(
+        "--dir", "-d", 
+        dest="target_dir",
+        help="Target directory to analyze (defaults to current directory)",
+        default=None
+    )
+    return parser.parse_args()
+
 if __name__ == "__main__":
-    asyncio.run(simple_demo()) 
+    args = parse_arguments()
+    asyncio.run(simple_demo(args.target_dir))

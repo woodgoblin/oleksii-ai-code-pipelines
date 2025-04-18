@@ -12,61 +12,13 @@ from dotenv import load_dotenv
 # Load environment variables from .env file
 load_dotenv()
 
-def get_weather(city: str) -> dict:
-    """Retrieves the current weather report for a specified city.
+# Global session variable to be set by the demo scripts
+_session = None
 
-    Args:
-        city (str): The name of the city for which to retrieve the weather report.
-
-    Returns:
-        dict: status and result or error msg.
-    """
-    if city.lower() == "new york":
-        return {
-            "status": "success",
-            "report": (
-                "The weather in New York is sunny with a temperature of 25 degrees"
-                " Celsius (41 degrees Fahrenheit)."
-            ),
-        }
-    else:
-        return {
-            "status": "error",
-            "error_message": f"Weather information for '{city}' is not available.",
-        }
-
-
-def get_current_time(city: str) -> dict:
-    """Returns the current time in a specified city.
-
-    Args:
-        city (str): The name of the city for which to retrieve the current time.
-
-    Returns:
-        dict: status and result or error msg.
-    """
-
-    if city.lower() == "new york":
-        tz_identifier = "America/New_York"
-    else:
-        return {
-            "status": "error",
-            "error_message": (
-                f"Sorry, I don't have timezone information for {city}."
-            ),
-        }
-
-    tz = ZoneInfo(tz_identifier)
-    now = datetime.datetime.now(tz)
-    report = (
-        f'The current time in {city} is {now.strftime("%Y-%m-%d %H:%M:%S %Z%z")}'
-    )
-    return {"status": "success", "report": report}
-
-APP_NAME = "cursor_prompt_preprocessor"
-USER_ID = "dev_user_01"
-SESSION_ID = "session_01"
-GEMINI_MODEL = "gemini-2.0-flash"
+def set_global_session(session):
+    """Set the global session variable for use in tools."""
+    global _session
+    _session = session
 
 # --- State Keys ---
 STATE_USER_PROMPT = "user_prompt"
@@ -79,6 +31,12 @@ STATE_RELEVANCE_SCORES = "relevance_scores"
 STATE_QUESTIONS = "clarifying_questions"
 STATE_ANSWERS = "clarifying_answers"
 STATE_FINAL_CONTEXT = "final_context"
+STATE_TARGET_DIRECTORY = "target_directory"  # New state key for target directory
+
+APP_NAME = "cursor_prompt_preprocessor"
+USER_ID = "dev_user_01"
+SESSION_ID = "session_01"
+GEMINI_MODEL = "gemini-2.0-flash"
 
 # --- Tools ---
 
@@ -108,27 +66,43 @@ def get_project_structure(directory) -> dict:
     except Exception as e:
         return {"error": str(e)}
 
-def scan_project_structure() -> dict:
-    """Wrapper function to scan the current project structure.
+def get_target_directory_from_state() -> str:
+    """Utility function to get the target directory from the session state.
     
-    This function doesn't take any parameters to avoid issues with automatic function calling.
+    Returns:
+        str: The target directory path, or "." if not set.
+    """
+    global _session
+    if _session and STATE_TARGET_DIRECTORY in _session.state:
+        return _session.state[STATE_TARGET_DIRECTORY]
+    return "."
+
+def scan_project_structure() -> dict:
+    """Wrapper function to scan the project structure.
+    
+    Uses the target directory from the session state if available.
     
     Returns:
         dict: A dictionary representation of the project structure.
     """
-    return get_project_structure(".")
+    target_dir = get_target_directory_from_state()
+    return get_project_structure(target_dir)
 
 def get_dependencies() -> dict:
     """Analyzes project dependencies from requirements.txt, package.json, etc.
+    
+    Uses the target directory from the session state if available.
 
     Returns:
         dict: A dictionary of project dependencies and their versions.
     """
+    target_dir = get_target_directory_from_state()
     dependencies = {}
     
     # Check for Python requirements.txt
-    if os.path.exists("requirements.txt"):
-        with open("requirements.txt", "r") as file:
+    req_path = os.path.join(target_dir, "requirements.txt")
+    if os.path.exists(req_path):
+        with open(req_path, "r") as file:
             for line in file:
                 line = line.strip()
                 if line and not line.startswith("#"):
@@ -143,9 +117,10 @@ def get_dependencies() -> dict:
                             dependencies[line] = "latest"
     
     # Check for package.json (Node.js)
-    if os.path.exists("package.json"):
+    pkg_path = os.path.join(target_dir, "package.json")
+    if os.path.exists(pkg_path):
         import json
-        with open("package.json", "r") as file:
+        with open(pkg_path, "r") as file:
             try:
                 package_data = json.load(file)
                 if "dependencies" in package_data:
@@ -161,19 +136,23 @@ def get_dependencies() -> dict:
 
 def filter_by_gitignore() -> dict:
     """Filters the project structure based on gitignore rules.
+    
+    Uses the target directory from the session state if available.
 
     Returns:
         dict: Filtered project structure.
     """
     try:
-        structure = get_project_structure(".")
+        target_dir = get_target_directory_from_state()
+        structure = get_project_structure(target_dir)
         
-        # Check if .gitignore exists
-        if not os.path.exists(".gitignore"):
+        # Check if .gitignore exists in the target directory
+        gitignore_path = os.path.join(target_dir, ".gitignore")
+        if not os.path.exists(gitignore_path):
             return structure
         
         # Parse gitignore
-        matches = gitignore_parser.parse_gitignore(".gitignore")
+        matches = gitignore_parser.parse_gitignore(gitignore_path)
         
         # Helper function to filter structure
         def filter_structure(struct, path=""):
@@ -196,6 +175,22 @@ def filter_by_gitignore() -> dict:
         # If there's an error, return an error message
         return {"error": f"Error filtering by gitignore: {str(e)}"}
 
+def set_target_directory(directory: str) -> dict:
+    """Sets the target directory for code analysis.
+    
+    Args:
+        directory: The directory path to analyze.
+        
+    Returns:
+        dict: A confirmation message.
+    """
+    # This function will be used by the demo script to inject the directory into the session state
+    return {
+        "status": "success", 
+        "message": f"Set target directory to: {directory}", 
+        "directory": directory
+    }
+
 def apply_gitignore_filter() -> dict:
     """Wrapper function to apply gitignore filtering with no parameters.
     
@@ -203,24 +198,6 @@ def apply_gitignore_filter() -> dict:
         dict: Filtered project structure.
     """
     return filter_by_gitignore()
-
-# Gitignore Filter Agent
-gitignore_filter_agent = LlmAgent(
-    name="GitignoreFilterAgent",
-    model=GEMINI_MODEL,
-    instruction="""
-    You are a Gitignore Filter.
-    Your task is to filter the project structure based on the project's gitignore rules.
-    This helps focus on relevant code files and exclude build artifacts, caches, etc.
-    
-    Call the apply_gitignore_filter function to get the filtered project structure.
-    
-    Return the filtered project structure showing only the files and directories that
-    would typically be relevant for understanding the codebase.
-    """,
-    tools=[FunctionTool(func=apply_gitignore_filter)],
-    output_key=STATE_FILTERED_STRUCTURE
-)
 
 def search_code_with_prompt() -> dict:
     """Wrapper function to search code using the prompt from the session state.
@@ -283,8 +260,6 @@ project_structure_agent = LlmAgent(
     Your task is to scan the project directory structure provided in the session state
     and summarize the key components and organization of the project.
     
-    Call the scan_project_structure function to get the project structure.
-    
     Focus on identifying:
     1. Main source code directories
     2. Test directories
@@ -322,6 +297,24 @@ dependency_analysis_agent = LlmAgent(
     output_key=STATE_DEPENDENCIES
 )
 
+# Gitignore Filter Agent
+gitignore_filter_agent = LlmAgent(
+    name="GitignoreFilterAgent",
+    model=GEMINI_MODEL,
+    instruction="""
+    You are a Gitignore Filter.
+    Your task is to filter the project structure based on the project's gitignore rules.
+    This helps focus on relevant code files and exclude build artifacts, caches, etc.
+    
+    Call the apply_gitignore_filter function to get the filtered project structure.
+    
+    Return the filtered project structure showing only the files and directories that
+    would typically be relevant for understanding the codebase.
+    """,
+    tools=[FunctionTool(func=apply_gitignore_filter)],
+    output_key=STATE_FILTERED_STRUCTURE
+)
+
 # Code Search Agent
 code_search_agent = LlmAgent(
     name="CodeSearchAgent",
@@ -334,11 +327,6 @@ code_search_agent = LlmAgent(
     1. First, call search_code_with_prompt() to get instructions for searching
     2. Extract 3-5 key technical terms or concepts from the prompt stored in '{STATE_USER_PROMPT}'
     3. Use your analysis to find relevant code files
-    
-    For the codebase search, focus on:
-    - Files related to the technologies mentioned (e.g., Python, aiohttp)
-    - Files that might implement similar functionality
-    - Configuration files related to the request
     
     Format your response as a clear summary of the most relevant code locations.
     """,
@@ -358,11 +346,6 @@ test_search_agent = LlmAgent(
     1. First, call search_tests_with_prompt() to get instructions for searching
     2. Extract 3-5 key technical terms or concepts from the prompt stored in '{STATE_USER_PROMPT}'
     3. Use your analysis to find relevant test files
-    
-    For the test file search, focus on:
-    - Test files related to the technologies mentioned (e.g., Python, aiohttp)
-    - Test files that test similar functionality
-    - Test configurations related to the request
     
     Format your response as a clear summary of the most relevant test files that could
     help understand how the components in question are tested.
@@ -388,15 +371,7 @@ relevance_determination_agent = LlmAgent(
     2. Assign relevance scores or rankings
     3. Explain the rationale for the most relevant files
     
-    If few or no files were found, provide a recommendation based on the user's request.
-    For a REST API with Python/aiohttp, suggest focusing on:
-    - API route definitions
-    - Request/response handling
-    - Authentication middleware
-    - Data models
-    
     Format your response as a ranked list with explanations for why each top file is relevant.
-    If no existing files were found, explain what files would need to be created.
     """,
     tools=[FunctionTool(func=determine_relevance_from_prompt)],
     output_key=STATE_RELEVANCE_SCORES
@@ -477,7 +452,8 @@ root_agent = LlmAgent(
     Your first task is to:
     1. Welcome the user
     2. Store their coding prompt in the session state with key '{STATE_USER_PROMPT}' using the set_state tool
-    3. Transfer control to the ContextFormer agent
+    3. If a target directory was provided, acknowledge it
+    4. Transfer control to the ContextFormer agent
     
     Be sure to always store the user's coding prompt in the state key '{STATE_USER_PROMPT}' before proceeding.
     
@@ -487,6 +463,6 @@ root_agent = LlmAgent(
     
     Keep your responses friendly, professional, and focused on helping the user succeed with their coding task.
     """,
-    tools=[FunctionTool(func=set_state)],
+    tools=[FunctionTool(func=set_state), FunctionTool(func=set_target_directory)],
     sub_agents=[context_former]
 )
