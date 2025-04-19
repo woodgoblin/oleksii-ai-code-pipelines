@@ -32,6 +32,7 @@ STATE_QUESTIONS = "clarifying_questions"
 STATE_ANSWERS = "clarifying_answers"
 STATE_FINAL_CONTEXT = "final_context"
 STATE_TARGET_DIRECTORY = "target_directory"  # New state key for target directory
+STATE_NEEDS_ANSWERS = "needs_answers"  # New state key to track if we need answers
 
 APP_NAME = "cursor_prompt_preprocessor"
 USER_ID = "dev_user_01"
@@ -249,6 +250,47 @@ def set_state(key: str, value: str) -> dict:
     """
     return {"status": "success", "message": f"Stored value in state key '{key}'", "key": key}
 
+def collect_user_answers(answers: str) -> dict:
+    """Collect answers from the user to the clarifying questions.
+    
+    Args:
+        answers: The user's answers to the clarifying questions
+        
+    Returns:
+        dict: Confirmation of the operation
+    """
+    return {
+        "status": "success",
+        "message": "Collected user's answers to clarifying questions",
+        "answers": answers
+    }
+
+def check_questions_exist() -> dict:
+    """Check if there are any questions that need answers.
+    
+    Returns:
+        dict: Information about whether questions exist and need answers
+    """
+    global _session
+    if _session and STATE_QUESTIONS in _session.state:
+        questions = _session.state[STATE_QUESTIONS]
+        
+        # Handle different types of question formats
+        if isinstance(questions, str):
+            # For string type questions
+            if questions and "no questions" not in questions.lower():
+                return {"has_questions": True, "questions": questions}
+        elif isinstance(questions, list):
+            # For list/array type questions
+            if questions and len(questions) > 0:
+                return {"has_questions": True, "questions": questions}
+        elif isinstance(questions, dict):
+            # For dictionary type questions
+            if "questions" in questions and questions["questions"]:
+                return {"has_questions": True, "questions": questions["questions"]}
+    
+    return {"has_questions": False}
+
 # --- LLM Agents ---
 
 # Project Structure Agent
@@ -394,7 +436,41 @@ question_asking_agent = LlmAgent(
     The questions should help pinpoint exactly what the user needs in terms of code implementation.
     Format your response as a list of questions only, or "No questions needed." if appropriate.
     """,
+    tools=[FunctionTool(func=check_questions_exist)],
     output_key=STATE_QUESTIONS
+)
+
+# User Answer Collection Agent
+user_answer_collection_agent = LlmAgent(
+    name="UserAnswerCollectionAgent",
+    model=GEMINI_MODEL,
+    instruction=f"""
+    You are a User Answer Collector.
+    Your task is to:
+    
+    1. Check if there are any clarifying questions in the state key '{STATE_QUESTIONS}'
+    2. If questions exist, STOP THE PIPELINE and display them DIRECTLY to the user
+    3. Wait for the user's responses and collect them
+    4. Store the user's answers in the state key '{STATE_ANSWERS}'
+    
+    IMPORTANT: The user MUST see the questions directly in your response. Do not hide them
+    behind function calls or additional messages. Display them clearly and directly.
+    
+    First, call check_questions_exist() to determine if there are questions that need answers.
+    
+    If questions exist:
+    - Display the exact questions to the user in a clear, readable format
+    - Wait for their response before proceeding
+    - When the user provides answers, use collect_user_answers() to store them
+    
+    If no questions exist, simply state that no clarification is needed and continue.
+    """,
+    tools=[
+        FunctionTool(func=check_questions_exist),
+        FunctionTool(func=collect_user_answers),
+        FunctionTool(func=set_state)
+    ],
+    output_key=STATE_ANSWERS
 )
 
 # Context Formation Agent
@@ -428,7 +504,7 @@ parallel_search_agent = ParallelAgent(
     sub_agents=[code_search_agent, test_search_agent]
 )
 
-# Create the sequential pipeline 
+# Create the sequential pipeline with question-answer capability
 context_former = SequentialAgent(
     name="ContextFormer",
     sub_agents=[
@@ -438,6 +514,7 @@ context_former = SequentialAgent(
         parallel_search_agent,
         relevance_determination_agent,
         question_asking_agent,
+        user_answer_collection_agent,  # Add the user answer collection agent
         context_formation_agent
     ]
 )
