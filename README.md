@@ -34,25 +34,87 @@ source venv/bin/activate  # On Windows: venv\Scripts\activate
 pip install -r requirements.txt
 ```
 
+4. Set up your API Key:
+```bash
+# Create a .env file in the cursor_prompt_preprocessor directory
+echo "GOOGLE_API_KEY=your_api_key_here" > cursor_prompt_preprocessor/.env
+```
+
 ## Usage
 
-### CLI
+### Running the Demo
 
-The preprocessor can be used as a command-line tool:
+The easiest way to use the preprocessor is through the demo script:
 
 ```bash
-# Process a prompt directly
-python main.py "Create a REST API endpoint for user authentication"
+# Process a prompt using the current directory as context
+python cursor_prompt_preprocessor/demo.py
 
-# Process a prompt from a file
-python main.py -f prompt.txt
+# Process a prompt using a specific directory as context
+python cursor_prompt_preprocessor/demo.py --dir /path/to/your/project
 
-# Save the context to a file
-python main.py "Create a login form" -o context.json
-
-# Run in interactive mode
-python main.py -i
+# On Windows, use full path with quotes if needed
+python cursor_prompt_preprocessor/demo.py --dir "C:\Users\YourUsername\path\to\project"
 ```
+
+The demo will:
+1. Scan the target directory to understand its structure
+2. Analyze project dependencies
+3. Filter by gitignore rules
+4. Search for relevant code and test files
+5. Form a comprehensive context object for code generation
+
+### Rate Limit Handling
+
+The demo script includes built-in rate limit handling with exponential backoff, automatically retrying API calls when rate limits are hit. This is particularly useful when using the free tier of the Gemini API.
+
+### Using Programmatically
+
+```python
+from google.adk.runners import Runner
+from google.adk.sessions import InMemorySessionService
+from google.genai import types
+from cursor_prompt_preprocessor import root_agent
+from cursor_prompt_preprocessor.agent import set_global_session
+
+# Setup
+APP_NAME = "cursor_prompt_preprocessor"
+USER_ID = "user_id"
+SESSION_ID = "session_id"
+
+# Create session and runner
+session_service = InMemorySessionService()
+session = session_service.create_session(app_name=APP_NAME, user_id=USER_ID, session_id=SESSION_ID)
+
+# Set the global session for proper target directory handling
+set_global_session(session)
+
+# Set target directory in session state
+session.state["target_directory"] = "/path/to/your/project"
+
+# Create runner
+runner = Runner(agent=root_agent, app_name=APP_NAME, session_service=session_service)
+
+# Send a prompt
+def process_prompt(prompt):
+    content = types.Content(role='user', parts=[types.Part(text=prompt)])
+    events = runner.run(user_id=USER_ID, session_id=SESSION_ID, new_message=content)
+    
+    for event in events:
+        if event.is_final_response():
+            print(f"Response: {event.content.parts[0].text}")
+
+# Example
+process_prompt("Create a REST API endpoint for user authentication")
+```
+
+## Requirements
+
+- Python 3.8+
+- google-adk>=0.1.0
+- google-generativeai>=0.6.0
+- gitignore_parser
+- python-dotenv
 
 ## License
 
