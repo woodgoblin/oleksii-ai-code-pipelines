@@ -7,13 +7,65 @@ import glob
 import os
 import gitignore_parser
 import re
+import time
+import threading
+from collections import deque
+from functools import wraps
 from dotenv import load_dotenv
+from google.adk.sessions import InMemorySessionService
 
 # Load environment variables from .env file
 load_dotenv()
 
-# Global session variable to be set by the demo scripts
-_session = None
+APP_NAME = "cursor_prompt_preprocessor"
+USER_ID = "demo_user"
+SESSION_ID = "demo_session"
+
+# Create session service and session
+session_service = InMemorySessionService()
+_session = session_service.create_session(app_name=APP_NAME, user_id=USER_ID, session_id=SESSION_ID)
+
+# Rate limiter implementation for LLM calls
+class RateLimiter:
+    """Rate limiter for API calls that enforces a maximum number of calls per minute.
+    
+    Thread-safe implementation using a sliding window approach.
+    """
+    def __init__(self, max_calls_per_minute=10):
+        self.max_calls = max_calls_per_minute
+        self.window_seconds = 60  # 1 minute
+        self.call_history = deque(maxlen=max_calls_per_minute)
+        self.lock = threading.RLock()  # Reentrant lock for thread safety
+        print(f"Rate limiter initialized: {max_calls_per_minute} calls per minute")
+    
+    def wait_if_needed(self):
+        """Blocks until a call can be made without exceeding the rate limit."""
+        with self.lock:
+            current_time = time.time()
+            
+            # If we haven't reached the max calls yet, allow immediately
+            if len(self.call_history) < self.max_calls:
+                self.call_history.append(current_time)
+                return
+            
+            # Check if the oldest call is outside our window
+            oldest_call_time = self.call_history[0]
+            time_since_oldest = current_time - oldest_call_time
+            
+            # If we've used all our quota and need to wait
+            if time_since_oldest < self.window_seconds:
+                wait_time = self.window_seconds - time_since_oldest + 0.1  # Add a small buffer
+                print(f"Rate limit reached. Waiting for {wait_time:.2f} seconds...")
+                time.sleep(wait_time)
+                # After waiting, current time has changed
+                current_time = time.time()
+            
+            # Update our history
+            self.call_history.popleft()
+            self.call_history.append(current_time)
+
+# Create a global rate limiter instance
+rate_limiter = RateLimiter(max_calls_per_minute=10)
 
 def set_global_session(session):
     """Set the global session variable for use in tools."""
@@ -185,7 +237,12 @@ def set_target_directory(directory: str) -> dict:
     Returns:
         dict: A confirmation message.
     """
-    # This function will be used by the demo script to inject the directory into the session state
+    global _session
+    if _session:
+        _session.state[STATE_TARGET_DIRECTORY] = directory
+    else:
+        print("No session found AAAAAAAAAA!!!!!!!!!!!!!!!!!!!!!!!!!!!!!")
+    
     return {
         "status": "success", 
         "message": f"Set target directory to: {directory}", 
@@ -278,16 +335,14 @@ def check_questions_exist() -> dict:
         # Handle different types of question formats
         if isinstance(questions, str):
             # For string type questions
-            if questions and "no questions" not in questions.lower():
-                return {"has_questions": True, "questions": questions}
+            return {"has_questions": True, "questions": questions}
         elif isinstance(questions, list):
             # For list/array type questions
             if questions and len(questions) > 0:
                 return {"has_questions": True, "questions": questions}
         elif isinstance(questions, dict):
             # For dictionary type questions
-            if "questions" in questions and questions["questions"]:
-                return {"has_questions": True, "questions": questions["questions"]}
+            return {"has_questions": True, "questions": questions["questions"]}
     
     return {"has_questions": False}
 
