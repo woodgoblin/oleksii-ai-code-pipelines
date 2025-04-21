@@ -42,31 +42,30 @@ echo "GOOGLE_API_KEY=your_api_key_here" > cursor_prompt_preprocessor/.env
 
 ## Usage
 
-### Running the Demo
+### Running the Application
 
-The easiest way to use the preprocessor is through the demo script:
+To use the preprocessor with a specific target directory:
 
 ```bash
-# Process a prompt using the current directory as context
-python cursor_prompt_preprocessor/demo.py
+# Start the application with Google ADK CLI
+adk run cursor_prompt_preprocessor
 
-# Process a prompt using a specific directory as context
-python cursor_prompt_preprocessor/demo.py --dir /path/to/your/project
-
-# On Windows, use full path with quotes if needed
-python cursor_prompt_preprocessor/demo.py --dir "C:\Users\YourUsername\path\to\project"
+# Or if running from the ADK web interface, use the set_target_directory function
+# to specify the target directory for analysis
 ```
 
-The demo will:
-1. Scan the target directory to understand its structure
-2. Analyze project dependencies
-3. Filter by gitignore rules
-4. Search for relevant code and test files
-5. Form a comprehensive context object for code generation
+When setting a target directory with Windows paths, use proper escaping if needed:
+```
+# Example of setting a Windows path
+set_target_directory("C:\\Users\\YourUsername\\path\\to\\project")
+```
 
-### Rate Limit Handling
+### Key Components
 
-The demo script includes built-in rate limit handling with exponential backoff, automatically retrying API calls when rate limits are hit. This is particularly useful when using the free tier of the Gemini API.
+- **Session Management**: The application uses `InMemorySessionService` to automatically manage sessions
+- **Target Directory**: Specify the directory to analyze using the `set_target_directory` function
+- **Clarification Questions**: The system will ask clarifying questions when your prompt lacks sufficient detail
+- **Context Formation**: The final output is a comprehensive context object suitable for code generation
 
 ### Using Programmatically
 
@@ -75,19 +74,15 @@ from google.adk.runners import Runner
 from google.adk.sessions import InMemorySessionService
 from google.genai import types
 from cursor_prompt_preprocessor import root_agent
-from cursor_prompt_preprocessor.agent import set_global_session
 
-# Setup
+# Setup constants
 APP_NAME = "cursor_prompt_preprocessor"
 USER_ID = "user_id"
 SESSION_ID = "session_id"
 
-# Create session and runner
+# Create session service and runner
 session_service = InMemorySessionService()
 session = session_service.create_session(app_name=APP_NAME, user_id=USER_ID, session_id=SESSION_ID)
-
-# Set the global session for proper target directory handling
-set_global_session(session)
 
 # Set target directory in session state
 session.state["target_directory"] = "/path/to/your/project"
