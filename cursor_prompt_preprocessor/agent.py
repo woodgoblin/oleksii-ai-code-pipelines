@@ -13,6 +13,63 @@ from collections import deque
 from functools import wraps
 from dotenv import load_dotenv
 from google.adk.sessions import InMemorySessionService
+import logging
+import logging.handlers
+import sys
+
+# Configure logging
+def setup_logging():
+    """Set up logging to file and console with proper formatting."""
+    log_dir = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), 'logs')
+    os.makedirs(log_dir, exist_ok=True)
+    
+    log_file = os.path.join(log_dir, f'cursor_preprocessor_{datetime.datetime.now().strftime("%Y%m%d_%H%M%S")}.log')
+    
+    # Create a logger
+    logger = logging.getLogger()
+    logger.setLevel(logging.INFO)
+    
+    # Create formatters
+    file_formatter = logging.Formatter('%(asctime)s - %(levelname)s - %(name)s - %(message)s')
+    console_formatter = logging.Formatter('%(message)s')
+    
+    # File handler for detailed logs
+    file_handler = logging.handlers.RotatingFileHandler(
+        log_file, maxBytes=10485760, backupCount=5, encoding='utf-8'
+    )
+    file_handler.setFormatter(file_formatter)
+    file_handler.setLevel(logging.INFO)
+    logger.addHandler(file_handler)
+    
+    # Console handler for regular output
+    console_handler = logging.StreamHandler(sys.stdout)
+    console_handler.setFormatter(console_formatter)
+    console_handler.setLevel(logging.INFO)
+    logger.addHandler(console_handler)
+    
+    # Redirect stdout and stderr to the logger
+    sys.stdout = LoggerWriter(logger.info)
+    sys.stderr = LoggerWriter(logger.error)
+    
+    logger.info(f"Logging initialized. Log file: {log_file}")
+    return logger
+
+class LoggerWriter:
+    """File-like object to redirect stdout/stderr to logger."""
+    
+    def __init__(self, writer_func):
+        self.writer_func = writer_func
+        self.buffer = ''
+        
+    def write(self, message):
+        if message and not message.isspace():
+            self.writer_func(message.rstrip())
+            
+    def flush(self):
+        pass
+
+# Set up logging
+logger = setup_logging()
 
 # Load environment variables from .env file
 load_dotenv()
@@ -36,7 +93,7 @@ class RateLimiter:
         self.window_seconds = 60  # 1 minute
         self.call_history = deque(maxlen=max_calls_per_minute)
         self.lock = threading.RLock()  # Reentrant lock for thread safety
-        print(f"Rate limiter initialized: {max_calls_per_minute} calls per minute")
+        logger.info(f"Rate limiter initialized: {max_calls_per_minute} calls per minute")
     
     def wait_if_needed(self):
         """Blocks until a call can be made without exceeding the rate limit."""
@@ -55,7 +112,7 @@ class RateLimiter:
             # If we've used all our quota and need to wait
             if time_since_oldest < self.window_seconds:
                 wait_time = self.window_seconds - time_since_oldest + 0.1  # Add a small buffer
-                print(f"Rate limit reached. Waiting for {wait_time:.2f} seconds...")
+                logger.info(f"Rate limit reached. Waiting for {wait_time:.2f} seconds...")
                 time.sleep(wait_time)
                 # After waiting, current time has changed
                 current_time = time.time()
@@ -240,8 +297,9 @@ def set_target_directory(directory: str) -> dict:
     global _session
     if _session:
         _session.state[STATE_TARGET_DIRECTORY] = directory
+        logger.info(f"Target directory set to: {directory}")
     else:
-        print("No session found AAAAAAAAAA!!!!!!!!!!!!!!!!!!!!!!!!!!!!!")
+        logger.error("No session found when setting target directory")
     
     return {
         "status": "success", 
