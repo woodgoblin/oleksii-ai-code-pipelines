@@ -124,6 +124,95 @@ class RateLimiter:
 # Create a global rate limiter instance
 rate_limiter = RateLimiter(max_calls_per_minute=10)
 
+# Callback to handle 429 rate limit errors
+def handle_rate_limit(callback_context, llm_response):
+    """After-model callback to handle rate limit errors.
+    
+    Args:
+        callback_context: The callback context
+        llm_response: The LLM response
+        
+    Returns:
+        Modified response if rate limit was hit, None otherwise
+    """
+    # Check if there's an error in the response
+    error = getattr(llm_response, 'error', None)
+    if error and "429" in str(error):
+        logger.warning(f"Rate limit error detected: {error}")
+        
+        # Extract retry delay if provided in the error message
+        retry_delay = 5  # Default 5 seconds
+        delay_match = re.search(r"'retryDelay': '(\d+)s'", str(error))
+        if delay_match:
+            retry_delay = int(delay_match.group(1))
+            
+        # Wait before retrying
+        logger.info(f"Rate limit hit, waiting for {retry_delay} seconds before retry...")
+        time.sleep(retry_delay + 1)  # Add 1 second buffer
+        
+        # Create a modified response indicating we'll retry
+        from google.genai import types
+        return types.Content(
+            role="model",
+            parts=[types.Part(text="Rate limit hit, retrying after delay...")]
+        )
+    
+    # If no rate limit error, return None to use the original response
+    return None
+
+# Pre-model callback to enforce rate limiting before making requests
+def pre_model_rate_limit(callback_context, llm_request):
+    """Pre-model callback to enforce rate limiting before making API calls.
+    
+    Args:
+        callback_context: The callback context
+        llm_request: The LLM request parameters
+        
+    Returns:
+        None to continue with the normal request, or a response to short-circuit
+    """
+    # Apply rate limiting before making the request
+    try:
+        logger.info("Pre-model rate limit check")
+        rate_limiter.wait_if_needed()
+        return None  # Continue with normal request
+    except Exception as e:
+        logger.error(f"Error in pre-model rate limit check: {e}")
+        # If there's an error in rate limiting, create a fallback response
+        from google.genai import types
+        return types.Content(
+            role="model", 
+            parts=[types.Part(text="Error in rate limiting, please try again.")]
+        )
+
+# Patch all LlmAgent instantiations to include both callbacks
+def create_rate_limited_agent(name, model, instruction, tools=None, output_key=None, sub_agents=None):
+    """Factory function to create LlmAgents with rate limiting.
+    
+    Ensures all agents have proper rate limiting applied.
+    
+    Args:
+        name: Agent name
+        model: Model name
+        instruction: Agent instructions
+        tools: List of tools
+        output_key: Output state key
+        sub_agents: List of sub-agents
+    
+    Returns:
+        LlmAgent with rate limiting applied
+    """
+    return LlmAgent(
+        name=name,
+        model=model,
+        instruction=instruction,
+        tools=tools or [],
+        output_key=output_key,
+        sub_agents=sub_agents or [],
+        before_model_callback=pre_model_rate_limit,
+        after_model_callback=handle_rate_limit
+    )
+
 def set_global_session(session):
     """Set the global session variable for use in tools."""
     global _session
@@ -146,7 +235,7 @@ STATE_NEEDS_ANSWERS = "needs_answers"  # New state key to track if we need answe
 APP_NAME = "cursor_prompt_preprocessor"
 USER_ID = "dev_user_01"
 SESSION_ID = "session_01"
-GEMINI_MODEL = "gemini-2.0-flash"
+GEMINI_MODEL = "gemini-2.5-flash-preview-04-17"
 
 # --- Tools ---
 
@@ -389,25 +478,32 @@ def check_questions_exist() -> dict:
     global _session
     if _session and STATE_QUESTIONS in _session.state:
         questions = _session.state[STATE_QUESTIONS]
+        logger.info(f"Found questions in session state: {questions}")
         
         # Handle different types of question formats
         if isinstance(questions, str):
             # For string type questions
-            return {"has_questions": True, "questions": questions}
+            if questions and "no questions" not in questions.lower():
+                logger.info("Detected string type questions")
+                return {"has_questions": True, "questions": questions}
         elif isinstance(questions, list):
             # For list/array type questions
             if questions and len(questions) > 0:
+                logger.info(f"Detected list type questions with {len(questions)} items")
                 return {"has_questions": True, "questions": questions}
         elif isinstance(questions, dict):
             # For dictionary type questions
-            return {"has_questions": True, "questions": questions["questions"]}
+            if "questions" in questions and questions["questions"]:
+                logger.info("Detected dictionary type questions")
+                return {"has_questions": True, "questions": questions["questions"]}
     
+    logger.info("No questions found or needed")
     return {"has_questions": False}
 
 # --- LLM Agents ---
 
 # Project Structure Agent
-project_structure_agent = LlmAgent(
+project_structure_agent = create_rate_limited_agent(
     name="ProjectStructureAgent",
     model=GEMINI_MODEL,
     instruction="""
@@ -431,7 +527,7 @@ project_structure_agent = LlmAgent(
 )
 
 # Dependency Analysis Agent
-dependency_analysis_agent = LlmAgent(
+dependency_analysis_agent = create_rate_limited_agent(
     name="DependencyAnalysisAgent",
     model=GEMINI_MODEL,
     instruction="""
@@ -453,7 +549,7 @@ dependency_analysis_agent = LlmAgent(
 )
 
 # Gitignore Filter Agent
-gitignore_filter_agent = LlmAgent(
+gitignore_filter_agent = create_rate_limited_agent(
     name="GitignoreFilterAgent",
     model=GEMINI_MODEL,
     instruction="""
@@ -471,7 +567,7 @@ gitignore_filter_agent = LlmAgent(
 )
 
 # Code Search Agent
-code_search_agent = LlmAgent(
+code_search_agent = create_rate_limited_agent(
     name="CodeSearchAgent",
     model=GEMINI_MODEL,
     instruction=f"""
@@ -490,7 +586,7 @@ code_search_agent = LlmAgent(
 )
 
 # Test Search Agent
-test_search_agent = LlmAgent(
+test_search_agent = create_rate_limited_agent(
     name="TestSearchAgent",
     model=GEMINI_MODEL,
     instruction=f"""
@@ -510,7 +606,7 @@ test_search_agent = LlmAgent(
 )
 
 # Relevance Determination Agent
-relevance_determination_agent = LlmAgent(
+relevance_determination_agent = create_rate_limited_agent(
     name="RelevanceDeterminationAgent",
     model=GEMINI_MODEL,
     instruction=f"""
@@ -533,7 +629,7 @@ relevance_determination_agent = LlmAgent(
 )
 
 # Question Asking Agent
-question_asking_agent = LlmAgent(
+question_asking_agent = create_rate_limited_agent(
     name="QuestionAskingAgent",
     model=GEMINI_MODEL,
     instruction=f"""
@@ -554,7 +650,7 @@ question_asking_agent = LlmAgent(
 )
 
 # User Answer Collection Agent
-user_answer_collection_agent = LlmAgent(
+user_answer_collection_agent = create_rate_limited_agent(
     name="UserAnswerCollectionAgent",
     model=GEMINI_MODEL,
     instruction=f"""
@@ -572,8 +668,10 @@ user_answer_collection_agent = LlmAgent(
     First, call check_questions_exist() to determine if there are questions that need answers.
     
     If questions exist:
-    - Display the exact questions to the user in a clear, readable format
-    - Wait for their response before proceeding
+    - You MUST display the exact questions to the user in a clear, readable format as your MAIN response
+    - Present the questions one by one, numbered or bulleted
+    - Do not add any introduction before the questions - start immediately with the questions
+    - Wait for the user's response before proceeding
     - When the user provides answers, use collect_user_answers() to store them
     
     If no questions exist, simply state that no clarification is needed and continue.
@@ -587,7 +685,7 @@ user_answer_collection_agent = LlmAgent(
 )
 
 # Context Formation Agent
-context_formation_agent = LlmAgent(
+context_formation_agent = create_rate_limited_agent(
     name="ContextFormationAgent",
     model=GEMINI_MODEL,
     instruction=f"""
@@ -633,7 +731,7 @@ context_former = SequentialAgent(
 )
 
 # The root agent is the entry point for the user prompt
-root_agent = LlmAgent(
+root_agent = create_rate_limited_agent(
     name="PromptProcessor",
     model=GEMINI_MODEL,
     instruction=f"""
