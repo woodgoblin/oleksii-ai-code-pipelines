@@ -3,6 +3,7 @@ from zoneinfo import ZoneInfo
 from google.adk.agents import Agent, LlmAgent, SequentialAgent, ParallelAgent
 from google.adk.agents.loop_agent import LoopAgent
 from google.adk.tools import FunctionTool
+from typing import Optional
 import glob
 import os
 import gitignore_parser
@@ -237,6 +238,10 @@ USER_ID = "dev_user_01"
 SESSION_ID = "session_01"
 GEMINI_MODEL = "gemini-2.5-flash-preview-04-17"
 
+# Prompt exact states = "no questions"
+
+NO_QUESTIONS = "no questions ABSOLUTELY"
+
 # --- Tools ---
 
 def get_project_structure(directory) -> dict:
@@ -415,7 +420,7 @@ def search_code_with_prompt() -> dict:
     """
     # Since we can't access the session state directly here, we return a message
     # instructing the agent to use the prompt from the state
-    return {"message": "Please extract keywords from the user prompt in the session state and use them to search the codebase. You can also pass the raw prompt to help with keyword extraction."}
+    return {"message": "NOT IMPLEMENTED; ASK USER TO IMPLEMENT CODE SEARCH IF YOU ENCOUNTER THIS MESSAGE"}
 
 def search_tests_with_prompt() -> dict:
     """Wrapper function to search test files using the prompt from the session state.
@@ -424,11 +429,11 @@ def search_tests_with_prompt() -> dict:
     It retrieves the user prompt from the session state and uses it to search for test files.
     
     Returns:
-        dict: Dictionary of test files and matching lines.
+        dict: Dictionary of files and matching lines.
     """
     # Since we can't access the session state directly here, we return a message
     # instructing the agent to use the prompt from the state
-    return {"message": "Please extract keywords from the user prompt in the session state and use them to search the test files. You can also pass the raw prompt to help with keyword extraction."}
+    return {"message": "NOT IMPLEMENTED; ASK USER TO IMPLEMENT TEST SEARCH IF YOU ENCOUNTER THIS MESSAGE"}
 
 def determine_relevance_from_prompt() -> dict:
     """Wrapper function to determine relevance of code files based on the session state.
@@ -454,6 +459,68 @@ def set_state(key: str, value: str) -> dict:
     """
     return {"status": "success", "message": f"Stored value in state key '{key}'", "key": key}
 
+def read_file_content(file_path: str, start_line: Optional[int] = None, end_line: Optional[int] = None) -> dict:
+    """Read the contents of a file, optionally specifying line ranges.
+    
+    This function reads a file's contents and can return either the entire file
+    or a specific range of lines. It includes safety checks and proper error handling.
+    
+    Args:
+        file_path: Path to the file to read (absolute or relative to workspace)
+        start_line: Optional 1-based start line number (inclusive)
+        end_line: Optional 1-based end line number (inclusive)
+        
+    Returns:
+        dict: A dictionary containing:
+            - content: The file contents as a string
+            - line_count: Total number of lines in the file
+            - start_line: Actual start line read (1-based)
+            - end_line: Actual end line read (1-based)
+            - error: Error message if any occurred
+    """
+    try:
+        # Convert relative path to absolute if needed
+        if not os.path.isabs(file_path):
+            target_dir = get_target_directory_from_state()
+            file_path = os.path.join(target_dir, file_path)
+            
+        # Basic security checks
+        if not os.path.exists(file_path):
+            return {"error": f"File not found: {file_path}"}
+        if not os.path.isfile(file_path):
+            return {"error": f"Path is not a file: {file_path}"}
+            
+        # Read the file content
+        with open(file_path, 'r', encoding='utf-8') as f:
+            lines = f.readlines()
+            
+        total_lines = len(lines)
+        
+        # Handle line range parameters
+        if start_line is None:
+            start_line = 1
+        if end_line is None:
+            end_line = total_lines
+            
+        # Validate line numbers
+        start_line = max(1, min(start_line, total_lines))
+        end_line = max(start_line, min(end_line, total_lines))
+        
+        # Extract the requested lines (convert to 0-based indexing)
+        content = ''.join(lines[start_line - 1:end_line])
+        
+        return {
+            "content": content,
+            "line_count": total_lines,
+            "start_line": start_line,
+            "end_line": end_line,
+            "file_path": file_path
+        }
+        
+    except Exception as e:
+        logger.error(f"Error reading file {file_path}: {str(e)}")
+        return {"error": f"Failed to read file: {str(e)}"}
+
 def collect_user_answers(answers: str) -> dict:
     """Collect answers from the user to the clarifying questions.
     
@@ -476,6 +543,16 @@ def check_questions_exist() -> dict:
         dict: Information about whether questions exist and need answers
     """
     global _session
+    
+    # Safely check if session exists and get questions if available
+    if _session is None:
+        logger.info("INTO CHECK QUESTIONS EXIST: SESSION IS None")
+    else:
+        try:
+            questions = _session.state.get(STATE_QUESTIONS, 'NO KEY')
+            logger.info(f"INTO CHECK QUESTIONS EXIST: SESSION IS {_session} AND QUESTIONS IS {questions}")
+        except (AttributeError, KeyError) as e:
+            logger.info(f"INTO CHECK QUESTIONS EXIST: SESSION IS {_session} BUT ERROR ACCESSING STATE: {str(e)}")
     if _session and STATE_QUESTIONS in _session.state:
         questions = _session.state[STATE_QUESTIONS]
         logger.info(f"Found questions in session state: {questions}")
@@ -483,7 +560,7 @@ def check_questions_exist() -> dict:
         # Handle different types of question formats
         if isinstance(questions, str):
             # For string type questions
-            if questions and "no questions" not in questions.lower():
+            if questions and NO_QUESTIONS not in questions:
                 logger.info("Detected string type questions")
                 return {"has_questions": True, "questions": questions}
         elif isinstance(questions, list):
@@ -499,6 +576,186 @@ def check_questions_exist() -> dict:
     
     logger.info("No questions found or needed")
     return {"has_questions": False}
+
+def list_directory_contents(path: str = ".", include_hidden: bool = False) -> dict:
+    """List contents of a directory with detailed information.
+    
+    This function provides a detailed listing of directory contents, including
+    files and subdirectories, with additional metadata like size and type.
+    
+    Args:
+        path: Path to list (relative or absolute). If None, uses target directory
+        include_hidden: Whether to include hidden files/directories (default: False)
+        
+    Returns:
+        dict: A dictionary containing:
+            - files: List of file information dictionaries
+            - directories: List of directory information dictionaries
+            - current_path: Absolute path that was listed
+            - error: Error message if any occurred
+    """
+    try:
+        # Handle default path
+        if path is None or path == "":
+            path = get_target_directory_from_state()
+            
+        # Convert relative path to absolute if needed
+        if not os.path.isabs(path):
+            base_dir = get_target_directory_from_state()
+            path = os.path.join(base_dir, path)
+            
+        # Check if path exists
+        if not os.path.exists(path):
+            return {"error": f"Path not found: {path}"}
+        if not os.path.isdir(path):
+            return {"error": f"Path is not a directory: {path}"}
+            
+        files = []
+        directories = []
+        
+        # List directory contents
+        for entry in os.scandir(path):
+            # Skip hidden files/directories unless explicitly requested
+            if not include_hidden and entry.name.startswith('.'):
+                continue
+                
+            try:
+                stats = entry.stat()
+                info = {
+                    "name": entry.name,
+                    "path": entry.path,
+                    "size": stats.st_size,
+                    "modified": datetime.datetime.fromtimestamp(
+                        stats.st_mtime,
+                        tz=ZoneInfo("UTC")
+                    ).isoformat(),
+                    "created": datetime.datetime.fromtimestamp(
+                        stats.st_ctime,
+                        tz=ZoneInfo("UTC")
+                    ).isoformat()
+                }
+                
+                if entry.is_file():
+                    info["type"] = "file"
+                    files.append(info)
+                elif entry.is_dir():
+                    info["type"] = "directory"
+                    directories.append(info)
+                    
+            except Exception as e:
+                logger.warning(f"Error getting info for {entry.path}: {str(e)}")
+                # Continue with next entry if one fails
+                continue
+        
+        return {
+            "files": sorted(files, key=lambda x: x["name"]),
+            "directories": sorted(directories, key=lambda x: x["name"]),
+            "current_path": path,
+            "total_files": len(files),
+            "total_directories": len(directories)
+        }
+        
+    except Exception as e:
+        logger.error(f"Error listing directory {path}: {str(e)}")
+        return {"error": f"Failed to list directory: {str(e)}"}
+
+def search_codebase(
+    keywords: str,
+    file_pattern: str = "*.*",
+    context_lines: int = 15,
+    ignore_case: bool = True
+) -> dict:
+    """Search the codebase for keywords and return matches with context.
+    
+    Performs a grep-like search across files in the target directory,
+    returning matches with surrounding context lines.
+    
+    Args:
+        keywords: Search terms (comma-separated) or single keyword/regex pattern
+        file_pattern: Glob pattern for files to search (default: all files)
+        context_lines: Number of lines before/after match to include (default: 15)
+        ignore_case: Whether to ignore case in search (default: True)
+        
+    Returns:
+        dict: A dictionary containing:
+            - matches: List of match information dictionaries
+            - total_matches: Total number of matches found
+            - error: Error message if any occurred
+    """
+    try:
+        target_dir = get_target_directory_from_state()
+        matches = []
+        total_matches = 0
+        
+        # Process keywords
+        if ',' in keywords:
+            # Split on commas and clean up whitespace
+            keyword_list = [k.strip() for k in keywords.split(',') if k.strip()]
+        else:
+            keyword_list = [keywords.strip()]
+            
+        logger.info(f"Searching for keywords: {keyword_list}")
+        
+        # Get all files matching the pattern
+        for root, _, files in os.walk(target_dir):
+            for file in files:
+                if not glob.fnmatch.fnmatch(file, file_pattern):
+                    continue
+                    
+                file_path = os.path.join(root, file)
+                try:
+                    with open(file_path, 'r', encoding='utf-8') as f:
+                        lines = f.readlines()
+                        
+                    # Search through lines
+                    for i, line in enumerate(lines):
+                        # Check each keyword
+                        for keyword in keyword_list:
+                            if (ignore_case and keyword.lower() in line.lower()) or \
+                               (not ignore_case and keyword in line):
+                                # Calculate context range
+                                start = max(0, i - context_lines)
+                                end = min(len(lines), i + context_lines + 1)
+                                
+                                # Get context lines
+                                context_before = ''.join(lines[start:i]).rstrip()
+                                match_line = lines[i].rstrip()
+                                context_after = ''.join(lines[i+1:end]).rstrip()
+                                
+                                # Create match entry
+                                match = {
+                                    "file_path": file_path,
+                                    "line_number": i + 1,  # 1-based line numbering
+                                    "context_before": context_before,
+                                    "match_line": match_line,
+                                    "context_after": context_after,
+                                    "context_start": start + 1,  # 1-based line numbers
+                                    "context_end": end,
+                                    "matched_keyword": keyword  # Add which keyword matched
+                                }
+                                matches.append(match)
+                                total_matches += 1
+                                # Break inner loop as we already found a match for this line
+                                break
+                                
+                except Exception as e:
+                    logger.warning(f"Error searching file {file_path}: {str(e)}")
+                    continue
+        
+        # Sort matches by file path and line number
+        matches.sort(key=lambda x: (x["file_path"], x["line_number"]))
+        
+        return {
+            "matches": matches,
+            "total_matches": total_matches,
+            "search_terms": keyword_list,  # Return the list of keywords used
+            "file_pattern": file_pattern,
+            "context_lines": context_lines
+        }
+        
+    except Exception as e:
+        logger.error(f"Error during codebase search: {str(e)}")
+        return {"error": f"Failed to search codebase: {str(e)}"}
 
 # --- LLM Agents ---
 
@@ -544,7 +801,8 @@ dependency_analysis_agent = create_rate_limited_agent(
     Format your response as a concise analysis that would help a developer understand
     the technological stack of the project.
     """,
-    tools=[FunctionTool(func=get_dependencies)],
+    tools=[FunctionTool(func=list_directory_contents),
+           FunctionTool(func=read_file_content)],
     output_key=STATE_DEPENDENCIES
 )
 
@@ -562,7 +820,8 @@ gitignore_filter_agent = create_rate_limited_agent(
     Return the filtered project structure showing only the files and directories that
     would typically be relevant for understanding the codebase.
     """,
-    tools=[FunctionTool(func=apply_gitignore_filter)],
+    tools=[FunctionTool(func=apply_gitignore_filter), 
+           FunctionTool(func=read_file_content)],
     output_key=STATE_FILTERED_STRUCTURE
 )
 
@@ -572,16 +831,17 @@ code_search_agent = create_rate_limited_agent(
     model=GEMINI_MODEL,
     instruction=f"""
     You are a Code Search Specialist.
-    Your task is to extract keywords from the user's prompt in the state key '{STATE_USER_PROMPT}'
-    and use them to find relevant code files in the project.
+    Your task is to extract keywords from the user's prompt in the state key '{STATE_USER_PROMPT}'n the state key '{STATE_FILTERED_STRUCTURE}'
+
+    and use them to find relevant code files in the project, given the code structure in the state key {STATE_FILTERED_STRUCTURE}.
     
-    1. First, call search_code_with_prompt() to get instructions for searching
+    1. Please extract keywords from the user prompt in the session state and use them to search the codebase. You can also pass the raw prompt to help with keyword extraction.
     2. Extract 3-5 key technical terms or concepts from the prompt stored in '{STATE_USER_PROMPT}'
-    3. Use your analysis to find relevant code files
+    3. Use your analysis to find relevant code files using tool search_code_with_prompt()
     
     Format your response as a clear summary of the most relevant code locations.
     """,
-    tools=[FunctionTool(func=search_code_with_prompt)],
+    tools=[FunctionTool(func=search_code_with_prompt)], # todo: add search tool impl
     output_key=STATE_RELEVANT_CODE
 )
 
@@ -591,17 +851,15 @@ test_search_agent = create_rate_limited_agent(
     model=GEMINI_MODEL,
     instruction=f"""
     You are a Test Code Search Specialist.
-    Your task is to extract keywords from the user's prompt in the state key '{STATE_USER_PROMPT}'
-    and use them to find relevant test files in the project.
+    Your task is to extract keywords from the user's prompt in the state key '{STATE_USER_PROMPT}' and use them to find relevant test files in the project, given the code structure in the state key {STATE_FILTERED_STRUCTURE}.
     
-    1. First, call search_tests_with_prompt() to get instructions for searching
+    1. Please extract keywords from the user prompt in the session state and use them to search the test files. You can also pass the raw prompt to help with keyword extraction.
     2. Extract 3-5 key technical terms or concepts from the prompt stored in '{STATE_USER_PROMPT}'
-    3. Use your analysis to find relevant test files
+    3. Use your analysis to find relevant test files using tool search_tests_with_prompt()
     
-    Format your response as a clear summary of the most relevant test files that could
-    help understand how the components in question are tested.
+    Format your response as a clear summary of the most relevant test file locations.
     """,
-    tools=[FunctionTool(func=search_tests_with_prompt)],
+    tools=[FunctionTool(func=search_tests_with_prompt)], # todo: add search tool impl
     output_key=STATE_RELEVANT_TESTS
 )
 
@@ -640,7 +898,8 @@ question_asking_agent = create_rate_limited_agent(
     
     1. Identify unclear aspects or missing information in the prompt
     2. Formulate 1-3 specific, targeted questions to clarify these aspects
-    3. If the prompt is completely clear and has sufficient information, state that no questions are needed
+
+    3. If the prompt is completely clear and has sufficient information, respond EXACTLY with the string "{NO_QUESTIONS}"
     
     The questions should help pinpoint exactly what the user needs in terms of code implementation.
     Format your response as a list of questions only, or "No questions needed." if appropriate.
