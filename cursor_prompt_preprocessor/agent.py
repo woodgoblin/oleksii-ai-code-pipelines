@@ -2,8 +2,8 @@ import datetime
 from zoneinfo import ZoneInfo
 from google.adk.agents import Agent, LlmAgent, SequentialAgent, ParallelAgent
 from google.adk.agents.loop_agent import LoopAgent
-from google.adk.tools import FunctionTool
-from typing import Optional
+from google.adk.tools import FunctionTool, ToolContext, LongRunningFunctionTool
+from typing import Optional, Generator, Any
 import glob
 import os
 import gitignore_parser
@@ -521,61 +521,6 @@ def read_file_content(file_path: str, start_line: Optional[int] = None, end_line
         logger.error(f"Error reading file {file_path}: {str(e)}")
         return {"error": f"Failed to read file: {str(e)}"}
 
-def collect_user_answers(answers: str) -> dict:
-    """Collect answers from the user to the clarifying questions.
-    
-    Args:
-        answers: The user's answers to the clarifying questions
-        
-    Returns:
-        dict: Confirmation of the operation
-    """
-    return {
-        "status": "success",
-        "message": "Collected user's answers to clarifying questions",
-        "answers": answers
-    }
-
-def check_questions_exist() -> dict:
-    """Check if there are any questions that need answers.
-    
-    Returns:
-        dict: Information about whether questions exist and need answers
-    """
-    global _session
-    
-    # Safely check if session exists and get questions if available
-    if _session is None:
-        logger.info("INTO CHECK QUESTIONS EXIST: SESSION IS None")
-    else:
-        try:
-            questions = _session.state.get(STATE_QUESTIONS, 'NO KEY')
-            logger.info(f"INTO CHECK QUESTIONS EXIST: SESSION IS {_session} AND QUESTIONS IS {questions}")
-        except (AttributeError, KeyError) as e:
-            logger.info(f"INTO CHECK QUESTIONS EXIST: SESSION IS {_session} BUT ERROR ACCESSING STATE: {str(e)}")
-    if _session and STATE_QUESTIONS in _session.state:
-        questions = _session.state[STATE_QUESTIONS]
-        logger.info(f"Found questions in session state: {questions}")
-        
-        # Handle different types of question formats
-        if isinstance(questions, str):
-            # For string type questions
-            if questions and NO_QUESTIONS not in questions:
-                logger.info("Detected string type questions")
-                return {"has_questions": True, "questions": questions}
-        elif isinstance(questions, list):
-            # For list/array type questions
-            if questions and len(questions) > 0:
-                logger.info(f"Detected list type questions with {len(questions)} items")
-                return {"has_questions": True, "questions": questions}
-        elif isinstance(questions, dict):
-            # For dictionary type questions
-            if "questions" in questions and questions["questions"]:
-                logger.info("Detected dictionary type questions")
-                return {"has_questions": True, "questions": questions["questions"]}
-    
-    logger.info("No questions found or needed")
-    return {"has_questions": False}
 
 def list_directory_contents(path: str = ".", include_hidden: bool = False) -> dict:
     """List contents of a directory with detailed information.
@@ -756,6 +701,22 @@ def search_codebase(
     except Exception as e:
         logger.error(f"Error during codebase search: {str(e)}")
         return {"error": f"Failed to search codebase: {str(e)}"}
+    
+class ClarifierGenerator:
+    __name__ =  "clarify_questions_tool"
+    
+    def __call__(self):
+        # Step 1: ask the question and pause
+        yield {
+            "status": "waiting_for_input",
+            "message": f"{_session.state.get(STATE_QUESTIONS, 'NO KEY ERROR TELL DEVELOPER(s) YOU SAW THIS OR ELSE')}"
+        }
+        # Step 2: resume here when human reply is injected
+        human_reply = yield
+        # Step 3: return the clarified info
+        return {"reply": human_reply}
+
+clarify_questions_tool = LongRunningFunctionTool(func=ClarifierGenerator())
 
 # --- LLM Agents ---
 
@@ -896,15 +857,15 @@ question_asking_agent = create_rate_limited_agent(
     along with the project information gathered so far, and generate clarifying questions
     when the prompt is ambiguous or lacks necessary details.
     
+    The questions should help pinpoint exactly what the user needs in terms of code implementation.
+    
     1. Identify unclear aspects or missing information in the prompt
     2. Formulate 1-3 specific, targeted questions to clarify these aspects
+    3. If you have questions to ask, respond with the questions you have.
+    4. If the prompt is completely clear and has sufficient information, respond EXACTLY with the string "{NO_QUESTIONS}"
 
-    3. If the prompt is completely clear and has sufficient information, respond EXACTLY with the string "{NO_QUESTIONS}"
-    
-    The questions should help pinpoint exactly what the user needs in terms of code implementation.
-    Format your response as a list of questions only, or "No questions needed." if appropriate.
     """,
-    tools=[FunctionTool(func=check_questions_exist)],
+    tools=[FunctionTool(func=read_file_content)],
     output_key=STATE_QUESTIONS
 )
 
@@ -916,28 +877,14 @@ user_answer_collection_agent = create_rate_limited_agent(
     You are a User Answer Collector.
     Your task is to:
     
-    1. Check if there are any clarifying questions in the state key '{STATE_QUESTIONS}'
-    2. If questions exist, STOP THE PIPELINE and display them DIRECTLY to the user
-    3. Wait for the user's responses and collect them
-    4. Store the user's answers in the state key '{STATE_ANSWERS}'
+    Check if there are any clarifying questions in the state key '{STATE_QUESTIONS}'.
     
-    IMPORTANT: The user MUST see the questions directly in your response. Do not hide them
-    behind function calls or additional messages. Display them clearly and directly.
+    If questions exist, you MUST use the clarify_questions_tool to get the user's answers. Once you used it, answer with exactly what you got from the tool.
     
-    First, call check_questions_exist() to determine if there are questions that need answers.
-    
-    If questions exist:
-    - You MUST display the exact questions to the user in a clear, readable format as your MAIN response
-    - Present the questions one by one, numbered or bulleted
-    - Do not add any introduction before the questions - start immediately with the questions
-    - Wait for the user's response before proceeding
-    - When the user provides answers, use collect_user_answers() to store them
-    
-    If no questions exist, simply state that no clarification is needed and continue.
+    If there are no questions (meaning that the {STATE_QUESTIONS} is equal to "{NO_QUESTIONS}"), respond EXACTLY with the string "HERE GOES EXIT FROM THE LOOP THAT IS NOT IMPLEMENTED YET"
     """,
     tools=[
-        FunctionTool(func=check_questions_exist),
-        FunctionTool(func=collect_user_answers),
+        clarify_questions_tool,
         FunctionTool(func=set_state)
     ],
     output_key=STATE_ANSWERS
@@ -974,17 +921,32 @@ parallel_search_agent = ParallelAgent(
     sub_agents=[code_search_agent, test_search_agent]
 )
 
+structure_and_dependencies_agent = SequentialAgent(
+    name="StructureAndDependencies",
+    sub_agents=[
+        project_structure_agent, 
+        dependency_analysis_agent,
+        gitignore_filter_agent
+    ]
+)
+
+clarification_and_decision_loop = LoopAgent(
+    name="ClarificationAndDecisionLoop",
+    sub_agents=[
+        parallel_search_agent,
+        relevance_determination_agent,
+        question_asking_agent,
+        user_answer_collection_agent
+    ], 
+    max_iterations=3
+)
+
 # Create the sequential pipeline with question-answer capability
 context_former = SequentialAgent(
     name="ContextFormer",
     sub_agents=[
-        project_structure_agent,
-        dependency_analysis_agent,
-        gitignore_filter_agent,
-        parallel_search_agent,
-        relevance_determination_agent,
-        question_asking_agent,
-        user_answer_collection_agent,  # Add the user answer collection agent
+        structure_and_dependencies_agent,
+        clarification_and_decision_loop,
         context_formation_agent
     ]
 )
