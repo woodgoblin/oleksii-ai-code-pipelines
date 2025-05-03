@@ -198,19 +198,32 @@ def get_state(key: str) -> dict:
     return {"status": "error", "message": f"Key '{key}' not found in state"}
 
 def check_for_potato() -> dict:
-    """Check if the word 'potato' is in the user prompt or clarification.
+    """Check if 'potato' is in the user prompt or any stored clarification.
+    
+    Handles STATE_CLARIFICATION potentially being a list of strings.
     
     Returns:
         dict: Result of the check
     """
     global _session
     
-    # Get user prompt and clarification if they exist
     user_prompt = _session.state.get(STATE_USER_PROMPT, "").lower()
-    clarification = _session.state.get(STATE_CLARIFICATION, "").lower()
+    clarifications_state = _session.state.get(STATE_CLARIFICATION, None)
     
-    # Check if 'potato' is in either
-    has_potato = 'potato' in user_prompt or 'potato' in clarification
+    # Check prompt first
+    has_potato_in_prompt = 'potato' in user_prompt
+    
+    # Check clarifications (handling list or string)
+    has_potato_in_clarifications = False
+    if isinstance(clarifications_state, list):
+        # Check if 'potato' is in any string within the list (case-insensitive)
+        has_potato_in_clarifications = any('potato' in str(item).lower() for item in clarifications_state)
+    elif isinstance(clarifications_state, str):
+        # Fallback for single string clarification (old format or direct set)
+        has_potato_in_clarifications = 'potato' in clarifications_state.lower()
+        
+    # Combine checks
+    has_potato = has_potato_in_prompt or has_potato_in_clarifications
     
     # Set the needs_clarification state
     _session.state[STATE_NEEDS_CLARIFICATION] = not has_potato
@@ -278,14 +291,16 @@ potato_check_agent = create_rate_limited_agent(
     You are the Potato Check Agent.
     
     Your task is to:
-    1. Check if the word 'potato' is present in either the user's prompt or any previous clarification
-    2. Call the check_for_potato tool to perform this check
-    3. If 'potato' is found, inform the user that clarification is not needed
-    4. If 'potato' is not found, mention that clarification will be needed
+    1. Check if the word 'potato' is present in the user's prompt or any stored clarifications using the check_for_potato tool.
+    2. The tool will update the 'needs_clarification' state.
+    3. **Report clearly:** Based on the tool's result, state whether clarification is needed (True/False) and that you are setting the corresponding state.
     
     Be concise and clear in your response.
     """,
-    tools=[FunctionTool(func=check_for_potato), FunctionTool(func=get_state)]
+    tools=[
+        FunctionTool(func=check_for_potato),
+        FunctionTool(func=get_state)
+    ]
 )
 
 # Clarification Agent - asks user for clarification if needed
@@ -297,12 +312,16 @@ clarification_agent = create_rate_limited_agent(
 
     Your task is based on the 'needs_clarification' state flag:
     1. Call get_state to check the boolean value of 'needs_clarification'.
-    2. If 'needs_clarification' is True:
-        a. Use the clarify_questions_tool. This tool will now BLOCK execution and prompt for input directly in the CONSOLE.
-        b. Once console input is provided, the tool will return the user's response.
-        c. Take the 'reply' from the tool's result and call set_state to store it in the 'clarification' state key.
-    3. If 'needs_clarification' is False:
-        a. Call redirect_and_exit() to terminate the loop and proceed to the FinalizerAgent.
+    2. **Report clearly:** State the value you retrieved for 'needs_clarification' (True or False).
+    3. If 'needs_clarification' is True:
+        a. Announce that you will now ask for clarification via the console tool.
+        b. Use the clarify_questions_tool to get console input.
+        c. Call get_state to retrieve the current list of clarifications.
+        d. Append the new 'reply' received from the tool to this list.
+        e. Call set_state to store the updated list back into the 'clarification' state key.
+    4. If 'needs_clarification' is False:
+        a. Announce that you are redirecting to the FinalizerAgent.
+        b. Call redirect_and_exit() to terminate the loop.
     """,
     tools=[
         FunctionTool(func=get_state),
@@ -317,12 +336,14 @@ finalizer_agent = create_rate_limited_agent(
     name="FinalizerAgent",
     model=GEMINI_MODEL,
     instruction="""
+    **Report clearly:** Announce that the Finalizer Agent is now running.
+    
     You are the Finalizer Agent.
     
     Your task is to:
-    1. Summarize the conversation so far
-    2. Highlight all session variables that have been set during this interaction
-    3. Present this information in a clear, structured format
+    1. Summarize the conversation, including the initial prompt and all collected clarifications.
+    2. Use get_state to retrieve all relevant session variables (like 'user_prompt', 'test_variable', and the list of 'clarification' responses).
+    3. Present this information in a clear, structured format, explicitly listing all items from the 'clarification' list if it exists.
     
     Be thorough but concise in your summary.
     """,
