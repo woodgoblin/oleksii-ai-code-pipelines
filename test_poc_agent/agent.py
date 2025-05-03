@@ -220,24 +220,23 @@ def check_for_potato() -> dict:
         "needs_clarification": not has_potato
     }
 
+# Update ClarifierGenerator to use console input()
 class ClarifierGenerator:
-    """Long-running function to ask for clarification from the user."""
-    __name__ = "clarify_questions_tool"
+    """Synchronous function to get console input for clarification."""
+    __name__ = "clarify_questions_tool" # Name remains the same for agent instructions
     
     def __call__(self):
-        # Step 1: ask for clarification and pause
-        yield {
-            "status": "waiting_for_input",
-            "message": "Could you please include the word 'potato' in your clarification? This is required to proceed."
-        }
-        # Step 2: resume here when human reply is injected
-        human_reply = yield
-        # Step 3: store the clarification
-        global _session
-        _session.state[STATE_CLARIFICATION] = human_reply
+        # Prompt the user directly in the console where the agent is running
+        print("--- CONSOLE INPUT REQUIRED ---")
+        prompt_message = "Could you please include the word 'potato' in your clarification? This is required to proceed: "
+        human_reply = input(prompt_message)
+        print("--- CONSOLE INPUT RECEIVED ---")
+        
+        # Return the received input
         return {"reply": human_reply}
 
-clarify_questions_tool = LongRunningFunctionTool(func=ClarifierGenerator())
+# Change to standard FunctionTool wrapping the console-input function
+clarify_questions_tool = FunctionTool(func=ClarifierGenerator())
 
 def redirect_and_exit(tool_context: ToolContext) -> dict:
     """
@@ -295,17 +294,20 @@ clarification_agent = create_rate_limited_agent(
     model=GEMINI_MODEL,
     instruction="""
     You are the Clarification Agent.
-    
-    Your task is to:
-    1. Check if clarification is needed (the STATE_NEEDS_CLARIFICATION should be true)
-    2. If clarification is needed, use the clarify_questions_tool to ask the user to include the word 'potato'
-    3. If clarification is not needed, simply acknowledge that and use redirect_and_exit() to exit the loop
-    
-    Remember: The clarification process is interactive with the user in the ADK web interface.
+
+    Your task is based on the 'needs_clarification' state flag:
+    1. Call get_state to check the boolean value of 'needs_clarification'.
+    2. If 'needs_clarification' is True:
+        a. Use the clarify_questions_tool. This tool will now BLOCK execution and prompt for input directly in the CONSOLE.
+        b. Once console input is provided, the tool will return the user's response.
+        c. Take the 'reply' from the tool's result and call set_state to store it in the 'clarification' state key.
+    3. If 'needs_clarification' is False:
+        a. Call redirect_and_exit() to terminate the loop and proceed to the FinalizerAgent.
     """,
     tools=[
         FunctionTool(func=get_state),
-        clarify_questions_tool,
+        clarify_questions_tool, # This is now a FunctionTool instance
+        FunctionTool(func=set_state),
         FunctionTool(func=redirect_and_exit)
     ]
 )
