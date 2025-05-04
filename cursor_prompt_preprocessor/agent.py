@@ -703,20 +703,23 @@ def search_codebase(
         return {"error": f"Failed to search codebase: {str(e)}"}
     
 class ClarifierGenerator:
-    __name__ =  "clarify_questions_tool"
-    
-    def __call__(self):
-        # Step 1: ask the question and pause
-        yield {
-            "status": "waiting_for_input",
-            "message": f"{_session.state.get(STATE_QUESTIONS, 'NO KEY ERROR TELL DEVELOPER(s) YOU SAW THIS OR ELSE')}"
-        }
-        # Step 2: resume here when human reply is injected
-        human_reply = yield
-        # Step 3: return the clarified info
+    '''Synchronous function to get console input for clarification.'''
+    __name__ = "clarify_questions_tool" # Name remains the same for agent instructions
+
+    def __call__(self) -> dict:
+        # Get the question from the state
+        question_to_ask = _session.state.get(STATE_QUESTIONS, "Could you please provide clarification? (Error: Question not found in state)")
+        
+        # Prompt the user directly in the console where the agent is running
+        print("--- CONSOLE INPUT REQUIRED ---")
+        human_reply = input(f"{question_to_ask}: ")
+        print("--- CONSOLE INPUT RECEIVED ---")
+        
+        # Return the received input
         return {"reply": human_reply}
 
-clarify_questions_tool = LongRunningFunctionTool(func=ClarifierGenerator())
+# Change to standard FunctionTool wrapping the console-input function
+clarify_questions_tool = FunctionTool(func=ClarifierGenerator())
 
 # --- LLM Agents ---
 
@@ -781,7 +784,7 @@ gitignore_filter_agent = create_rate_limited_agent(
     Return the filtered project structure showing only the files and directories that
     would typically be relevant for understanding the codebase.
     """,
-    tools=[FunctionTool(func=apply_gitignore_filter), 
+    tools=[FunctionTool(func=apply_gitignore_filter),
            FunctionTool(func=read_file_content)],
     output_key=STATE_FILTERED_STRUCTURE
 )
@@ -802,7 +805,9 @@ code_search_agent = create_rate_limited_agent(
     
     Format your response as a clear summary of the most relevant code locations.
     """,
-    tools=[FunctionTool(func=search_code_with_prompt)], # todo: add search tool impl
+    tools=[FunctionTool(func=search_code_with_prompt)
+           ,FunctionTool(func=read_file_content),
+           FunctionTool(func=list_directory_contents)], # todo: add search tool impl
     output_key=STATE_RELEVANT_CODE
 )
 
@@ -820,7 +825,9 @@ test_search_agent = create_rate_limited_agent(
     
     Format your response as a clear summary of the most relevant test file locations.
     """,
-    tools=[FunctionTool(func=search_tests_with_prompt)], # todo: add search tool impl
+    tools=[FunctionTool(func=search_code_with_prompt)
+           ,FunctionTool(func=read_file_content),
+           FunctionTool(func=list_directory_contents)], # todo: add search tool impl
     output_key=STATE_RELEVANT_TESTS
 )
 
@@ -858,8 +865,10 @@ question_asking_agent = create_rate_limited_agent(
     when the prompt is ambiguous or lacks necessary details.
     
     The questions should help pinpoint exactly what the user needs in terms of code implementation.
-    
-    1. Identify unclear aspects or missing information in the prompt
+
+
+    1. Identify unclear aspects or missing information in the prompt. Use the structure of the project to help you understand the user's prompt.
+    Use read_file_content() tool to clarify your doubts about the existing code before aszking the user.
     2. Formulate 1-3 specific, targeted questions to clarify these aspects
     3. If you have questions to ask, respond with the questions you have.
     4. If the prompt is completely clear and has sufficient information, respond EXACTLY with the string "{NO_QUESTIONS}"
@@ -875,17 +884,25 @@ user_answer_collection_agent = create_rate_limited_agent(
     model=GEMINI_MODEL,
     instruction=f"""
     You are a User Answer Collector.
-    Your task is to:
+    Your task is based on the content of the state key '{STATE_QUESTIONS}':
     
-    Check if there are any clarifying questions in the state key '{STATE_QUESTIONS}'.
-    
-    If questions exist, you MUST use the clarify_questions_tool to get the user's answers. Once you used it, answer with exactly what you got from the tool.
-    
-    If there are no questions (meaning that the {STATE_QUESTIONS} is equal to "{NO_QUESTIONS}"), respond EXACTLY with the string "HERE GOES EXIT FROM THE LOOP THAT IS NOT IMPLEMENTED YET"
+    1. Check if the value in '{STATE_QUESTIONS}' is EXACTLY the string "{NO_QUESTIONS}".
+    2. Report clearly: State whether questions were found or not.
+    3. If questions exist (i.e., the state is NOT "{NO_QUESTIONS}"):
+        a. Announce that you will now ask for clarification via the console tool, showing the question stored in the state.
+        b. Use the `clarify_questions_tool` to get console input.
+        c. Retrieve the current list of answers from the state key '{STATE_ANSWERS}' 
+        d. Append the new 'reply' received from the tool to this list.
+        e. Call `set_state` to store the updated list back into the '{STATE_ANSWERS}' state key.
+    4. If no questions exist (i.e., the state IS "{NO_QUESTIONS}"):
+        a. Announce that no clarification is needed and the loop should terminate.
+        b. Respond EXACTLY with the string "NO_CLARIFICATION_NEEDED_EXIT_LOOP"
+        
+    Ensure you handle the state correctly, especially creating the list for '{STATE_ANSWERS}' if it's the first answer.
     """,
     tools=[
-        clarify_questions_tool,
-        FunctionTool(func=set_state)
+        clarify_questions_tool, # This is now a FunctionTool
+        FunctionTool(func=set_state) # Added get_state to retrieve current answers
     ],
     output_key=STATE_ANSWERS
 )
