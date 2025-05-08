@@ -220,8 +220,9 @@ question_asking_agent = create_rate_limited_agent(
     instruction=f"""
     You are a Clarifying Question Generator.
     Your task is to analyze the user's prompt from the state key '{STATE_USER_PROMPT}'
-    along with the project information gathered so far, and generate clarifying questions
-    when the prompt is ambiguous or lacks necessary details.
+    along with the project information gathered so far including your previous questions state key  {STATE_QUESTIONS} 
+    the state key '{STATE_ANSWERS}', and generate clarifying questions
+    when the prompt + clarifications are ambiguous or lacks necessary details.
     
     The questions should help pinpoint exactly what the user needs in terms of code implementation.
     
@@ -255,8 +256,8 @@ user_answer_collection_agent = create_rate_limited_agent(
         a. Announce that you will now ask for clarification via the console tool, showing the question stored in the state.
         b. Use the `clarify_questions_tool` to get console input.
         c. Retrieve the current list of answers from the state key '{STATE_ANSWERS}' 
-        d. Append the new 'reply' received from the tool to this list.
-        e. Call `set_state` to store the updated list back into the '{STATE_ANSWERS}' state key.
+        d. MUST Append the new 'reply' received from the tool to this list.
+        e. MUST Call `set_state` to store the updated list back into the '{STATE_ANSWERS}' state key.
     4. If no questions exist (i.e., the state IS "{NO_QUESTIONS}"):
         a. Announce that no clarification is needed and the loop should terminate.
         b. Respond EXACTLY with the string "NO_CLARIFICATION_NEEDED_EXIT_LOOP"
