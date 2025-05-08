@@ -84,9 +84,10 @@ project_structure_agent = create_rate_limited_agent(
     3. Configuration files
     4. Documentation
     5. Resource files
+    6. Any other important files, given the context of the projext
     
     Format your response as a structured summary that would help a developer understand
-    the project's organization. Focus only on important aspects of the structure that would
+    the project's organization. Focus on important aspects of the structure that would
     help with understanding the codebase.
     """,
     tools=[scan_project_structure_tool],
@@ -106,7 +107,8 @@ dependency_analysis_agent = create_rate_limited_agent(
     1. Identifying the main frameworks/libraries
     2. Noting any version constraints
     3. Recognizing patterns in the dependencies that indicate the project type
-    4. Flagging any potential issues (outdated dependencies, etc.)
+    4. Flagging any potential issues (outdated dependencies, known incompatibilities, etc.)
+    5. If the project is a monorepo, identify the main packages and their dependencies
     
     Format your response as a concise analysis that would help a developer understand
     the technological stack of the project.
@@ -120,7 +122,7 @@ gitignore_filter_agent = create_rate_limited_agent(
     name="GitignoreFilterAgent",
     model=GEMINI_MODEL,
     instruction="""
-    You are a Gitignore Filter.
+    You are a Gitignore Filter Agent.
     Your task is to filter the project structure based on the project's gitignore rules.
     This helps focus on relevant code files and exclude build artifacts, caches, etc.
     
@@ -149,6 +151,8 @@ code_search_agent = create_rate_limited_agent(
     3. Use your analysis to find relevant code files using tool search_code_with_prompt()
     
     Format your response as a clear summary of the most relevant code locations.
+
+    IMPORTANT: If needed, utilize the read_file_content() tool and list_directory_contents() tool to get more context about the codebase.
     """,
     tools=[
         search_code_with_prompt_tool,
@@ -174,6 +178,8 @@ test_search_agent = create_rate_limited_agent(
     3. Use your analysis to find relevant test files using tool search_tests_with_prompt()
     
     Format your response as a clear summary of the most relevant test file locations.
+    
+    IMPORTANT: If needed, utilize the read_file_content() tool and list_directory_contents() tool to get more context about the codebase.
     """,
     tools=[
         search_tests_with_prompt_tool,
@@ -202,7 +208,8 @@ relevance_determination_agent = create_rate_limited_agent(
     
     Format your response as a ranked list with explanations for why each top file is relevant.
     """,
-    tools=[determine_relevance_from_prompt_tool],
+
+    tools=[determine_relevance_from_prompt_tool, read_file_content_tool, list_directory_contents_tool],
     output_key=STATE_RELEVANCE_SCORES
 )
 
@@ -217,7 +224,12 @@ question_asking_agent = create_rate_limited_agent(
     when the prompt is ambiguous or lacks necessary details.
     
     The questions should help pinpoint exactly what the user needs in terms of code implementation.
+    
+    If you think that the prompt doesn't make sense in the context of the project, explain why in your question (rules for them above)
+    The project might contain code that already satisfies, or partially satisfies the user's prompt.
+    If the user prompt is ambiguous or its assumptions contradict some of the project's information, explain why in your question and request clarification.
 
+    Do the following, in order:
     1. Identify unclear aspects or missing information in the prompt. 
        Use the structure of the project to help you understand the user's prompt.
        Use read_file_content() tool to clarify your doubts about the existing code before asking the user.
@@ -268,15 +280,18 @@ context_formation_agent = create_rate_limited_agent(
     a comprehensive context object that will be used for code generation.
     
     Compile a structured context that includes:
-    1. The user's prompt (from '{STATE_USER_PROMPT}')
+    1. The initial user's prompt (from '{STATE_USER_PROMPT}')
     2. Relevant project structure information (from '{STATE_PROJECT_STRUCTURE}')
     3. Key dependencies (from '{STATE_DEPENDENCIES}')
     4. The most relevant code files and snippets (from '{STATE_RELEVANT_CODE}')
     5. The most relevant test files (from '{STATE_RELEVANT_TESTS}')
     6. Any clarifying questions and their answers (from '{STATE_QUESTIONS}' and '{STATE_ANSWERS}')
+    7. REALLY IMPORTANT: your summarization of the user's prompt, given the clarifying questions and their answers.
     
     Format your response as a well-structured context object with clear sections that a code
-    generation system would find helpful for understanding what needs to be implemented.
+    generation LLM would find helpful for understanding what needs to be implemented.
+    
+    IMPORTANT: The user's prompt is the initial prompt, and the summarization is the final prompt, given the clarifying questions and their answers.
     """,
     output_key=STATE_FINAL_CONTEXT
 )
@@ -337,6 +352,7 @@ root_agent = create_rate_limited_agent(
     Be sure to always store the user's coding prompt in the state key '{STATE_USER_PROMPT}' before proceeding.
     
     After the ContextFormer has completed, you should:
+    0. FLASH PRIORITY 0: write "AAAA DEBUG 001 001 001 PROMPT PROCESSOR HIT AFTER CONTEXT FORMER".
     1. Retrieve the final context from the session state
     2. Present a concise summary of what was found and how it will help with the code generation
     
