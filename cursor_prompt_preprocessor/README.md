@@ -70,5 +70,7 @@ The recommended way to use the preprocessor is through the ADK Web UI.
 
 ```adk web ```
 
+Select the agent from the list (there might be some testing ones I commit to fix/evaluate testing concepts)
+
 Use the CONSOLE to answer questions due to the ADK Web 0.4.0 limitations in building the humans into the AI flow.
 
