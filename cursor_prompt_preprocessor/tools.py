@@ -16,6 +16,25 @@ from cursor_prompt_preprocessor.config import STATE_TARGET_DIRECTORY, STATE_QUES
 from cursor_prompt_preprocessor.logging_setup import logger
 from cursor_prompt_preprocessor.session import session_manager
 
+# --- New MCP-friendly Clarification Tool ---
+def ask_human_clarification_mcp(question_to_ask: str) -> Dict[str, str]:
+    """Get clarification from the user via console input.
+    
+    This version is intended to be used as an MCP tool, taking the question directly.
+    
+    Args:
+        question_to_ask: The question to ask the user.
+        
+    Returns:
+        dict: The user's reply.
+    """
+    logger.info(f"Asking for human clarification via MCP tool: {question_to_ask}")
+    print("--- CONSOLE INPUT REQUIRED (MCP Tool) ---")
+    human_reply = input(f"{question_to_ask}: ")
+    print("--- CONSOLE INPUT RECEIVED (MCP Tool) ---")
+    return {"reply": human_reply}
+
+# --- Original ClarifierGenerator (for agent-side use if needed, or can be deprecated) ---
 class ClarifierGenerator:
     '''Synchronous function to get console input for clarification.'''
     __name__ = "clarify_questions_tool"  # Name for agent instructions
@@ -43,8 +62,9 @@ class ClarifierGenerator:
         return {"reply": human_reply}
 
 
-# --- File System Tools ---
+# --- File System Tools (Refactored for MCP) ---
 
+# This function remains for agent-side use to get the state if needed
 def get_target_directory_from_state() -> str:
     """Get the target directory from the session state.
     
@@ -53,437 +73,508 @@ def get_target_directory_from_state() -> str:
     """
     return session_manager.get_state(STATE_TARGET_DIRECTORY, ".")
 
-def get_project_structure(directory: str = None) -> Dict[str, Any]:
+def get_project_structure(base_directory: str) -> Dict[str, Any]:
     """Scan a directory and return its structure recursively.
 
     Args:
-        directory: The directory to scan. Uses "." if None or empty.
+        base_directory: The directory to scan.
 
     Returns:
         dict: A dictionary representation of the project structure.
     """
-    # Handle default value
-    if directory is None or directory == "":
-        directory = "."
+    # Ensure base_directory is not None or empty, default to "." if so (though MCP tool should always provide it)
+    current_scan_directory = base_directory if base_directory else "."
         
     structure = {"files": [], "directories": {}}
     try:
-        items = os.listdir(directory)
+        items = os.listdir(current_scan_directory)
         for item in items:
-            item_path = os.path.join(directory, item)
+            item_path = os.path.join(current_scan_directory, item)
             if os.path.isfile(item_path):
                 structure["files"].append(item)
-            elif os.path.isdir(item_path) and not item.startswith("."):
+            elif os.path.isdir(item_path) and not item.startswith("."): # Exclude .git, .venv etc.
+                # Recursive call should also use the absolute/correct path context
                 structure["directories"][item] = get_project_structure(item_path)
         return structure
     except Exception as e:
-        logger.error(f"Error getting project structure for {directory}: {str(e)}")
-        return {"error": str(e)}
+        logger.error(f"Error getting project structure for {current_scan_directory}: {str(e)}")
+        return {"error": str(e), "path_scanned": current_scan_directory}
 
-def scan_project_structure() -> Dict[str, Any]:
-    """Scan the target directory's structure.
+def scan_project_structure(target_directory: str) -> Dict[str, Any]:
+    """Scan the target directory's structure. (MCP-friendly)
     
-    Uses the target directory from the session state.
+    Args:
+        target_directory: The root directory to scan.
     
     Returns:
         dict: A dictionary representation of the project structure.
     """
-    target_dir = get_target_directory_from_state()
-    return get_project_structure(target_dir)
+    if not target_directory or not os.path.isdir(target_directory):
+        logger.error(f"Invalid target_directory for scan_project_structure: {target_directory}")
+        return {"error": f"Invalid or non-existent directory: {target_directory}"}
+    return get_project_structure(target_directory)
 
 def set_target_directory(directory: str) -> Dict[str, str]:
-    """Set the target directory for code analysis.
+    """Set the target directory for code analysis (MCP version).
+    
+    This MCP tool primarily validates and returns the directory. 
+    The calling agent is responsible for managing this state in its session.
     
     Args:
         directory: The directory path to analyze.
         
     Returns:
-        dict: A confirmation message.
+        dict: A confirmation message with the directory.
     """
-    result = session_manager.set_state(STATE_TARGET_DIRECTORY, directory)
-    logger.info(f"Target directory set to: {directory}")
+    # Basic validation (can be expanded)
+    # For MCP tool, it might just acknowledge the path.
+    # If it needs to be stored server-side for a specific MCP session, that's more complex.
+    # For now, it just returns it, and the agent handles session state.
+    logger.info(f"MCP tool 'set_target_directory' called with: {directory}")
     return {
-        "status": "success", 
-        "message": f"Set target directory to: {directory}", 
-        "key": STATE_TARGET_DIRECTORY,
-        "directory": directory
+        "status": "acknowledged", 
+        "message": f"Target directory acknowledged by MCP tool: {directory}",
+        "directory_set": directory # The agent can use this to update its state
     }
 
-def list_directory_contents(path: str = ".", include_hidden: bool = False) -> Dict[str, Any]:
-    """List contents of a directory with detailed information.
-    
-    This function provides a detailed listing of directory contents, including
-    files and subdirectories, with additional metadata like size and type.
+def list_directory_contents(
+    path_to_list: str, 
+    base_dir_context: str, 
+    include_hidden: bool = False
+) -> Dict[str, Any]:
+    """List contents of a directory with detailed information (MCP-friendly).
     
     Args:
-        path: Path to list (relative or absolute). If None, uses target directory
+        path_to_list: Path to list (can be relative to base_dir_context).
+        base_dir_context: The base directory context for resolving relative paths.
         include_hidden: Whether to include hidden files/directories (default: False)
         
     Returns:
         dict: Directory contents with metadata
     """
     try:
-        # Handle default path
-        if path is None or path == "":
-            path = get_target_directory_from_state()
+        # Resolve path_to_list
+        if not os.path.isabs(path_to_list):
+            if not base_dir_context or not os.path.isdir(base_dir_context):
+                return {"error": f"Invalid base_dir_context: {base_dir_context} for relative path: {path_to_list}"}
+            resolved_path = os.path.abspath(os.path.join(base_dir_context, path_to_list))
+        else:
+            resolved_path = os.path.abspath(path_to_list)
             
-        # Convert relative path to absolute if needed
-        if not os.path.isabs(path):
-            base_dir = get_target_directory_from_state()
-            path = os.path.join(base_dir, path)
-            
-        # Check if path exists
-        if not os.path.exists(path):
-            return {"error": f"Path not found: {path}"}
-        if not os.path.isdir(path):
-            return {"error": f"Path is not a directory: {path}"}
+        if not os.path.exists(resolved_path):
+            return {"error": f"Path not found: {resolved_path}"}
+        if not os.path.isdir(resolved_path):
+            return {"error": f"Path is not a directory: {resolved_path}"}
             
         files = []
         directories = []
         
-        # List directory contents
-        for entry in os.scandir(path):
-            # Skip hidden files/directories unless explicitly requested
+        for entry in os.scandir(resolved_path):
             if not include_hidden and entry.name.startswith('.'):
                 continue
-                
             try:
                 stats = entry.stat()
                 info = {
                     "name": entry.name,
-                    "path": entry.path,
+                    "path": entry.path, # This will be absolute path from scandir
                     "size": stats.st_size,
                     "modified": datetime.datetime.fromtimestamp(
-                        stats.st_mtime,
-                        tz=ZoneInfo("UTC")
-                    ).isoformat(),
+                        stats.st_mtime, tz=ZoneInfo("UTC")).isoformat(),
                     "created": datetime.datetime.fromtimestamp(
-                        stats.st_ctime,
-                        tz=ZoneInfo("UTC")
-                    ).isoformat()
+                        stats.st_ctime, tz=ZoneInfo("UTC")).isoformat()
                 }
-                
                 if entry.is_file():
                     info["type"] = "file"
                     files.append(info)
                 elif entry.is_dir():
                     info["type"] = "directory"
                     directories.append(info)
-                    
             except Exception as e:
                 logger.warning(f"Error getting info for {entry.path}: {str(e)}")
-                # Continue with next entry if one fails
                 continue
         
         return {
             "files": sorted(files, key=lambda x: x["name"]),
             "directories": sorted(directories, key=lambda x: x["name"]),
-            "current_path": path,
+            "current_path_listed": resolved_path,
             "total_files": len(files),
             "total_directories": len(directories)
         }
-        
     except Exception as e:
-        logger.error(f"Error listing directory {path}: {str(e)}")
+        logger.error(f"Error listing directory {path_to_list} (context: {base_dir_context}): {str(e)}")
         return {"error": f"Failed to list directory: {str(e)}"}
 
 def read_file_content(
-    file_path: str, 
+    file_path_to_read: str, 
+    base_dir_context: str,
     start_line: Optional[int] = None, 
     end_line: Optional[int] = None
 ) -> Dict[str, Any]:
-    """Read the contents of a file, optionally specifying line ranges.
-    
-    This function reads a file's contents and can return either the entire file
-    or a specific range of lines. It includes safety checks and proper error handling.
+    """Read the contents of a file (MCP-friendly).
     
     Args:
-        file_path: Path to the file to read (absolute or relative to workspace)
-        start_line: Optional 1-based start line number (inclusive)
-        end_line: Optional 1-based end line number (inclusive)
+        file_path_to_read: Path to the file (can be relative to base_dir_context).
+        base_dir_context: The base directory context for resolving relative file paths.
+        start_line: Optional 1-based start line number (inclusive).
+        end_line: Optional 1-based end line number (inclusive).
         
     Returns:
-        dict: File content and metadata
+        dict: File content and metadata.
     """
     try:
-        # Convert relative path to absolute if needed
-        if not os.path.isabs(file_path):
-            target_dir = get_target_directory_from_state()
-            file_path = os.path.join(target_dir, file_path)
+        if not os.path.isabs(file_path_to_read):
+            if not base_dir_context or not os.path.isdir(base_dir_context):
+                return {"error": f"Invalid base_dir_context: {base_dir_context} for relative file: {file_path_to_read}"}
+            resolved_file_path = os.path.abspath(os.path.join(base_dir_context, file_path_to_read))
+        else:
+            resolved_file_path = os.path.abspath(file_path_to_read)
             
-        # Basic security checks
-        if not os.path.exists(file_path):
-            return {"error": f"File not found: {file_path}"}
-        if not os.path.isfile(file_path):
-            return {"error": f"Path is not a file: {file_path}"}
+        if not os.path.exists(resolved_file_path):
+            return {"error": f"File not found: {resolved_file_path}"}
+        if not os.path.isfile(resolved_file_path):
+            return {"error": f"Path is not a file: {resolved_file_path}"}
             
-        # Read the file content
-        with open(file_path, 'r', encoding='utf-8') as f:
+        with open(resolved_file_path, 'r', encoding='utf-8') as f:
             lines = f.readlines()
             
         total_lines = len(lines)
+        actual_start_line = start_line if start_line is not None else 1
+        actual_end_line = end_line if end_line is not None else total_lines
         
-        # Handle line range parameters
-        if start_line is None:
-            start_line = 1
-        if end_line is None:
-            end_line = total_lines
-            
-        # Validate line numbers
-        start_line = max(1, min(start_line, total_lines))
-        end_line = max(start_line, min(end_line, total_lines))
+        actual_start_line = max(1, min(actual_start_line, total_lines if total_lines > 0 else 1))
+        actual_end_line = max(actual_start_line, min(actual_end_line, total_lines))
         
-        # Extract the requested lines (convert to 0-based indexing)
-        content = ''.join(lines[start_line - 1:end_line])
+        # Adjust for empty files or out-of-bounds requests on empty files
+        if total_lines == 0:
+            content_slice = []
+        else:
+            content_slice = lines[actual_start_line - 1:actual_end_line]
+
+        content = ''.join(content_slice)
         
         return {
             "content": content,
             "line_count": total_lines,
-            "start_line": start_line,
-            "end_line": end_line,
-            "file_path": file_path
+            "requested_start_line": start_line, # what was asked
+            "requested_end_line": end_line,     # what was asked
+            "actual_start_line": actual_start_line if total_lines > 0 else 0, # what was delivered
+            "actual_end_line": actual_end_line if total_lines > 0 else 0,     # what was delivered
+            "file_path_read": resolved_file_path
         }
-        
     except Exception as e:
-        logger.error(f"Error reading file {file_path}: {str(e)}")
+        logger.error(f"Error reading file {file_path_to_read} (context: {base_dir_context}): {str(e)}")
         return {"error": f"Failed to read file: {str(e)}"}
 
+# --- Project Analysis Tools (Refactored for MCP) ---
 
-# --- Project Analysis Tools ---
+def get_dependencies(target_directory: str) -> Dict[str, Any]:
+    """Analyze project dependencies (MCP-friendly).
 
-def get_dependencies() -> Dict[str, Any]:
-    """Analyze project dependencies from requirements.txt, package.json, etc.
-    
-    Uses the target directory from the session state.
+    Args:
+        target_directory: The root project directory.
 
     Returns:
-        dict: A dictionary of project dependencies and their versions.
+        dict: A dictionary of project dependencies.
     """
-    target_dir = get_target_directory_from_state()
-    dependencies = {}
+    if not target_directory or not os.path.isdir(target_directory):
+        return {"error": f"Invalid target_directory: {target_directory}"}
     
-    # Check for Python requirements.txt
-    req_path = os.path.join(target_dir, "requirements.txt")
+    dependencies = {}
+    req_path = os.path.join(target_directory, "requirements.txt")
     if os.path.exists(req_path):
-        with open(req_path, "r") as file:
+        with open(req_path, "r", encoding='utf-8') as file:
             for line in file:
                 line = line.strip()
                 if line and not line.startswith("#"):
-                    parts = line.split(">=")
-                    if len(parts) > 1:
-                        dependencies[parts[0]] = parts[1]
-                    else:
-                        parts = line.split("==")
-                        if len(parts) > 1:
-                            dependencies[parts[0]] = parts[1]
-                        else:
-                            dependencies[line] = "latest"
+                    # Improved parsing for various specifiers
+                    name = line.split(">=")[0].split("==")[0].split("<=")[0].split("!=")[0].split("~=")[0].split("<")[0].split(">")[0].strip()
+                    version_spec = line[len(name):].strip()
+                    dependencies[name] = version_spec if version_spec else "any"
     
-    # Check for package.json (Node.js)
-    pkg_path = os.path.join(target_dir, "package.json")
+    pkg_path = os.path.join(target_directory, "package.json")
     if os.path.exists(pkg_path):
         try:
-            with open(pkg_path, "r") as file:
+            with open(pkg_path, "r", encoding='utf-8') as file:
                 package_data = json.load(file)
-                if "dependencies" in package_data:
-                    for dep, version in package_data["dependencies"].items():
-                        dependencies[dep] = version
-                if "devDependencies" in package_data:
-                    for dep, version in package_data["devDependencies"].items():
-                        dependencies[dep] = version
+            if "dependencies" in package_data:
+                dependencies.update(package_data["dependencies"])
+            if "devDependencies" in package_data: # Often good to know these too
+                dependencies.update({f"dev_{k}": v for k, v in package_data["devDependencies"].items()})
         except json.JSONDecodeError:
-            dependencies["error"] = "Invalid package.json format"
+            logger.warning(f"Invalid package.json format in {target_directory}")
+            dependencies["package_json_error"] = "Invalid package.json format"
     
-    return dependencies
+    if not dependencies and "package_json_error" not in dependencies:
+        logger.info(f"No common dependency files found in {target_directory}")
+        return {"message": "No common dependency files (requirements.txt, package.json) found or parsed.", "path_checked": target_directory}
 
-def filter_by_gitignore() -> Dict[str, Any]:
-    """Filter the project structure based on gitignore rules.
+    return {"dependencies": dependencies, "path_checked": target_directory}
+
+
+def filter_by_gitignore(target_directory: str) -> Dict[str, Any]:
+    """Filter a project structure based on gitignore rules (MCP-friendly).
     
-    Uses the target directory from the session state.
+    Args:
+        target_directory: The root project directory containing .gitignore.
 
     Returns:
-        dict: Filtered project structure.
+        dict: Filtered project structure or error.
     """
     try:
-        target_dir = get_target_directory_from_state()
-        structure = get_project_structure(target_dir)
-        
-        # Check if .gitignore exists in the target directory
-        gitignore_path = os.path.join(target_dir, ".gitignore")
-        if not os.path.exists(gitignore_path):
-            return structure
-        
-        # Parse gitignore
-        matches = gitignore_parser.parse_gitignore(gitignore_path)
-        
-        # Helper function to filter structure
-        def filter_structure(struct, path=""):
-            filtered = {"files": [], "directories": {}}
+        if not target_directory or not os.path.isdir(target_directory):
+            return {"error": f"Invalid target_directory: {target_directory}"}
             
-            for file in struct["files"]:
-                file_path = os.path.join(path, file)
-                if not matches(file_path):
-                    filtered["files"].append(file)
-            
-            for dir_name, dir_struct in struct["directories"].items():
-                dir_path = os.path.join(path, dir_name)
-                if not matches(dir_path):
-                    filtered["directories"][dir_name] = filter_structure(dir_struct, dir_path)
-            
-            return filtered
-        
-        return filter_structure(structure)
-    except Exception as e:
-        # If there's an error, return an error message
-        logger.error(f"Error filtering by gitignore: {str(e)}")
-        return {"error": f"Error filtering by gitignore: {str(e)}"}
+        # Get the full structure first
+        # IMPORTANT: get_project_structure needs to work relative to the actual files,
+        # so we pass target_directory to it.
+        initial_structure = get_project_structure(target_directory)
+        if "error" in initial_structure:
+             return {"error": f"Could not get project structure for gitignore filtering: {initial_structure['error']}", "path_checked": target_directory}
 
-def apply_gitignore_filter() -> Dict[str, Any]:
-    """Apply gitignore filtering to the project structure.
+        gitignore_path = os.path.join(target_directory, ".gitignore")
+        if not os.path.exists(gitignore_path):
+            logger.info(f".gitignore not found in {target_directory}, returning full structure.")
+            return {"filtered_structure": initial_structure, "gitignore_status": "not_found", "path_checked": target_directory}
+        
+        # Base path for gitignore_parser should be the directory containing .gitignore
+        matches = gitignore_parser.parse_gitignore(gitignore_path, base_dir=os.path.abspath(target_directory))
+        
+        # Helper function to filter structure. Paths passed to 'matches' must be relative to target_directory
+        # or absolute, matching how parse_gitignore was initialized if base_dir was used correctly.
+        # Using os.path.relpath for consistency if paths in structure are absolute.
+        # Or, ensure paths constructed are relative to target_directory from the start.
+        
+        # Let's ensure paths used for matching are relative to the gitignore file's location (target_directory)
+        def filter_recursive(current_struct: Dict[str, Any], current_path_relative_to_target: str) -> Dict[str, Any]:
+            filtered_sub_structure = {"files": [], "directories": {}}
+            
+            for file_name in current_struct.get("files", []):
+                # Construct path relative to target_directory for matching
+                path_to_check = os.path.join(current_path_relative_to_target, file_name)
+                # gitignore_parser expects paths relative to the .gitignore location
+                # or absolute if base_dir was used correctly.
+                # For paths from os.walk or similar, they might be absolute already.
+                # If using base_dir with parse_gitignore, it handles this.
+                # Let's make path_to_check absolute then let 'matches' handle it.
+                abs_path_to_check = os.path.abspath(os.path.join(target_directory, path_to_check))
+
+                if not matches(abs_path_to_check):
+                    filtered_sub_structure["files"].append(file_name)
+            
+            for dir_name, dir_sub_struct in current_struct.get("directories", {}).items():
+                path_to_check = os.path.join(current_path_relative_to_target, dir_name)
+                abs_path_to_check = os.path.abspath(os.path.join(target_directory, path_to_check))
+                
+                if not matches(abs_path_to_check):
+                    filtered_sub_structure["directories"][dir_name] = filter_recursive(dir_sub_struct, path_to_check)
+            
+            return filtered_sub_structure
+        
+        # Start filtering from the root of the structure, with an empty relative path initially
+        filtered_result = filter_recursive(initial_structure, "") 
+        return {"filtered_structure": filtered_result, "gitignore_status": "applied", "path_checked": target_directory}
+
+    except Exception as e:
+        logger.error(f"Error filtering by gitignore for {target_directory}: {str(e)}")
+        return {"error": f"Error filtering by gitignore: {str(e)}", "path_checked": target_directory}
+
+def apply_gitignore_filter(target_directory: str) -> Dict[str, Any]:
+    """Apply gitignore filtering to the project structure (MCP-friendly wrapper).
     
+    Args:
+        target_directory: The root project directory.
+        
     Returns:
         dict: Filtered project structure.
     """
-    return filter_by_gitignore()
+    return filter_by_gitignore(target_directory)
 
 def search_codebase(
-    keywords: str,
-    file_pattern: str = "*.*",
+    target_directory: str,
+    keywords: str, # comma-separated
+    file_pattern: str = "*.*", # Glob pattern
     context_lines: int = 15,
     ignore_case: bool = True
 ) -> Dict[str, Any]:
-    """Search the codebase for keywords with surrounding context.
+    """Search the codebase for keywords (MCP-friendly).
     
     Args:
-        keywords: Search terms (comma-separated) or single keyword/regex pattern
-        file_pattern: Glob pattern for files to search (default: all files)
-        context_lines: Number of lines before/after match to include (default: 15)
-        ignore_case: Whether to ignore case in search (default: True)
+        target_directory: The root directory to search within.
+        keywords: Search terms (comma-separated).
+        file_pattern: Glob pattern for files to search.
+        context_lines: Number of lines before/after match.
+        ignore_case: Whether to ignore case.
         
     Returns:
-        dict: Search results with matches and context
+        dict: Search results.
     """
     try:
-        target_dir = get_target_directory_from_state()
-        matches = []
-        total_matches = 0
+        if not target_directory or not os.path.isdir(target_directory):
+            return {"error": f"Invalid target_directory: {target_directory}"}
+
+        matches_found = []
+        total_matches_count = 0
         
-        # Process keywords
-        if ',' in keywords:
-            # Split on commas and clean up whitespace
-            keyword_list = [k.strip() for k in keywords.split(',') if k.strip()]
-        else:
-            keyword_list = [keywords.strip()]
-            
-        logger.info(f"Searching for keywords: {keyword_list}")
+        keyword_list = [k.strip() for k in keywords.split(',') if k.strip()]
+        if not keyword_list:
+             return {"error": "No keywords provided for search.", "path_checked": target_directory}
+
+        logger.info(f"Searching in {target_directory} for keywords: {keyword_list} (pattern: {file_pattern})")
         
-        # Get all files matching the pattern
-        for root, _, files in os.walk(target_dir):
-            for file in files:
-                if not glob.fnmatch.fnmatch(file, file_pattern):
+        # Walk through the target_directory
+        for root, _, files_in_dir in os.walk(target_directory):
+            # TODO: Consider respecting .gitignore here for efficiency, though filter_by_gitignore is separate
+            # For now, it searches all non-hidden unless gitignored explicitly by pattern or other means.
+            # A common pattern is to skip directories like .git, .venv, __pycache__ early.
+            if any(part.startswith('.') for part in root.replace(target_directory, '').split(os.sep)): # crude skip hidden dirs
+                continue
+
+            for file_name in files_in_dir:
+                if not glob.fnmatch.fnmatch(file_name, file_pattern):
                     continue
                     
-                file_path = os.path.join(root, file)
+                current_file_path = os.path.join(root, file_name)
                 try:
-                    with open(file_path, 'r', encoding='utf-8') as f:
-                        lines = f.readlines()
+                    with open(current_file_path, 'r', encoding='utf-8', errors='ignore') as f_handle:
+                        lines_content = f_handle.readlines()
                         
-                    # Search through lines
-                    for i, line in enumerate(lines):
-                        # Check each keyword
-                        for keyword in keyword_list:
-                            if (ignore_case and keyword.lower() in line.lower()) or \
-                               (not ignore_case and keyword in line):
-                                # Calculate context range
-                                start = max(0, i - context_lines)
-                                end = min(len(lines), i + context_lines + 1)
+                    for i, line_text in enumerate(lines_content):
+                        for keyword_item in keyword_list:
+                            line_matches_keyword = (ignore_case and keyword_item.lower() in line_text.lower()) or \
+                                                 (not ignore_case and keyword_item in line_text)
+                            if line_matches_keyword:
+                                start_idx = max(0, i - context_lines)
+                                end_idx = min(len(lines_content), i + context_lines + 1)
                                 
-                                # Get context lines
-                                context_before = ''.join(lines[start:i]).rstrip()
-                                match_line = lines[i].rstrip()
-                                context_after = ''.join(lines[i+1:end]).rstrip()
+                                context_before_match = ''.join(lines_content[start_idx:i]).rstrip()
+                                matched_line_content = lines_content[i].rstrip()
+                                context_after_match = ''.join(lines_content[i+1:end_idx]).rstrip()
                                 
-                                # Create match entry
-                                match = {
-                                    "file_path": file_path,
-                                    "line_number": i + 1,  # 1-based line numbering
-                                    "context_before": context_before,
-                                    "match_line": match_line,
-                                    "context_after": context_after,
-                                    "context_start": start + 1,  # 1-based line numbers
-                                    "context_end": end,
-                                    "matched_keyword": keyword
+                                match_detail = {
+                                    "file_path": os.path.relpath(current_file_path, target_directory), # Relative path
+                                    "absolute_file_path": current_file_path,
+                                    "line_number": i + 1,
+                                    "context_before": context_before_match,
+                                    "match_line": matched_line_content,
+                                    "context_after": context_after_match,
+                                    "context_window_start": start_idx + 1,
+                                    "context_window_end": end_idx,
+                                    "matched_keyword": keyword_item
                                 }
-                                matches.append(match)
-                                total_matches += 1
-                                # Break inner loop as we already found a match for this line
-                                break
+                                matches_found.append(match_detail)
+                                total_matches_count += 1
+                                break # Found a keyword on this line, move to next line
                                 
-                except Exception as e:
-                    logger.warning(f"Error searching file {file_path}: {str(e)}")
-                    continue
+                except Exception as e_file:
+                    logger.warning(f"Error searching file {current_file_path}: {str(e_file)}")
+                    continue # Skip this file
         
-        # Sort matches by file path and line number
-        matches.sort(key=lambda x: (x["file_path"], x["line_number"]))
+        matches_found.sort(key=lambda x: (x["file_path"], x["line_number"]))
         
         return {
-            "matches": matches,
-            "total_matches": total_matches,
-            "search_terms": keyword_list,
-            "file_pattern": file_pattern,
-            "context_lines": context_lines
+            "matches": matches_found,
+            "total_matches": total_matches_count,
+            "search_terms_used": keyword_list,
+            "file_pattern_used": file_pattern,
+            "context_lines_set": context_lines,
+            "path_searched": target_directory
         }
         
-    except Exception as e:
-        logger.error(f"Error during codebase search: {str(e)}")
-        return {"error": f"Failed to search codebase: {str(e)}"}
+    except Exception as e_main:
+        logger.error(f"Error during codebase search in {target_directory}: {str(e_main)}")
+        return {"error": f"Failed to search codebase: {str(e_main)}", "path_searched": target_directory}
 
-# --- Agent Assistance Tools ---
+# --- Agent Assistance Tools (Placeholders - Refactored for MCP if they were to be implemented) ---
 
-def search_code_with_prompt() -> Dict[str, Any]:
-    """Search code using the prompt from the session state.
-    
-    This is a placeholder that would ideally be implemented with more specific logic.
-    
+def search_code_with_prompt(target_directory: str, prompt_text: str) -> Dict[str, Any]:
+    """Search code using a prompt (MCP-friendly placeholder).
+    Args:
+        target_directory: The directory to search within.
+        prompt_text: The user prompt to guide the search.
     Returns:
-        dict: Dictionary of files and matching lines.
+        dict: Placeholder message.
     """
-    return {"message": "NOT IMPLEMENTED; ASK USER TO IMPLEMENT CODE SEARCH IF YOU ENCOUNTER THIS MESSAGE"}
-
-def search_tests_with_prompt() -> Dict[str, Any]:
-    """Search test files using the prompt from the session state.
-    
-    This is a placeholder that would ideally be implemented with more specific logic.
-    
-    Returns:
-        dict: Dictionary of files and matching lines.
-    """
-    return {"message": "NOT IMPLEMENTED; ASK USER TO IMPLEMENT TEST SEARCH IF YOU ENCOUNTER THIS MESSAGE"}
-
-def determine_relevance_from_prompt() -> Dict[str, Any]:
-    """Determine relevance of code files based on the session state.
-    
-    Returns:
-        dict: Instructions for determining relevance.
-    """
+    logger.info(f"MCP tool 'search_code_with_prompt' called for dir: {target_directory} with prompt: '{prompt_text[:50]}...'")
+    # In a real implementation, this would use the prompt to derive keywords, patterns,
+    # or use semantic search capabilities.
     return {
-        "message": "Analyze the code and test files found based on the user's prompt. "
-                  "Rank them by relevance and explain why they might be useful for the task."
-    }
+        "message": "NOT IMPLEMENTED: search_code_with_prompt. Agent should use 'search_codebase' or this needs full implementation.",
+        "target_directory": target_directory,
+        "prompt_received": prompt_text
+        }
 
-def set_state(key: str, value: str) -> Dict[str, str]:
-    """Set a value in the session state.
+def search_tests_with_prompt(target_directory: str, prompt_text: str) -> Dict[str, Any]:
+    """Search test files using a prompt (MCP-friendly placeholder).
+    Args:
+        target_directory: The directory to search tests within.
+        prompt_text: The user prompt to guide the test search.
+    Returns:
+        dict: Placeholder message.
+    """
+    logger.info(f"MCP tool 'search_tests_with_prompt' called for dir: {target_directory} with prompt: '{prompt_text[:50]}...'")
+    return {
+        "message": "NOT IMPLEMENTED: search_tests_with_prompt. Agent should use 'search_codebase' with test file patterns or this needs full implementation.",
+        "target_directory": target_directory,
+        "prompt_received": prompt_text
+        }
+
+def determine_relevance_from_prompt(prompt_text: str, found_files_context: List[Dict[str, Any]]) -> Dict[str, Any]:
+    """MCP Tool (Placeholder): Determine relevance of found files/matches based on a prompt.
     
     Args:
-        key: The state key to set
-        value: The value to store
+        prompt_text: The user's prompt.
+        found_files_context: Contextual information about files/matches.
+        
+    Returns:
+        dict: Relevance scores or analysis.
+    """
+    # This is a placeholder. In a real implementation, this would likely involve
+    # more sophisticated logic, possibly another LLM call or embedding comparisons.
+    logger.info(f"Determining relevance for prompt: '{prompt_text[:50]}...' based on {len(found_files_context)} items.")
+    return {
+        "status": "placeholder_relevance_determined",
+        "prompt_analyzed": prompt_text,
+        "items_evaluated": len(found_files_context),
+        "relevance_output": "Placeholder: Detailed relevance analysis would go here."
+    }
+
+# --- Session State Tools (Refactored for MCP) ---
+
+def set_session_state(key: str, value_json_str: str) -> Dict[str, str]:
+    """Store a key-value pair in the session state. (MCP-friendly wrapper)
+    
+    Args:
+        key: The key to store.
+        value_json_str: The value to store, as a JSON-encoded string.
+                        If the original value is a simple string, it can be passed directly
+                        (it will be valid JSON if not containing special characters, or pass as a JSON string e.g. "mystring").
+                        For dicts or lists, serialize to JSON first before calling this tool.
+        
+    Returns:
+        dict: A status message.
+    """
+    actual_value: Any
+    try:
+        # Attempt to parse as JSON. This allows storing complex types.
+        actual_value = json.loads(value_json_str)
+    except json.JSONDecodeError:
+        # If it's not valid JSON, store it as a plain string.
+        # This handles cases where a simple string (not JSON-encoded) is passed.
+        actual_value = value_json_str
+
+    session_manager.set_state(key, actual_value)
+    logger.info(f"State set via MCP tool: Key='{key}', Type='{type(actual_value).__name__}' was set. Original string: '{value_json_str[:100]}...'")
+    return {"status": "success", "key_set": key, "value_type": type(actual_value).__name__}
+
+
+def get_session_state(key: str, default: Optional[Any] = None) -> Any:
+    """Get a value from the session state.
+    
+    Args:
+        key: The state key to retrieve.
+        default: The default value to return if the key is not found.
     
     Returns:
-        dict: Result information about the operation
+        Any: The retrieved value or the default if the key is not found.
     """
-    result = session_manager.set_state(key, value)
-    return {
-        "status": result["status"], 
-        "message": result["message"],
-        "key": result["key"]
-    } 
+    return session_manager.get_state(key, default) 

@@ -21,7 +21,7 @@ from cursor_prompt_preprocessor.rate_limiting import pre_model_rate_limit, handl
 from cursor_prompt_preprocessor.tools import (
     scan_project_structure, get_dependencies, apply_gitignore_filter,
     search_code_with_prompt, search_tests_with_prompt, determine_relevance_from_prompt,
-    set_state, set_target_directory, read_file_content, list_directory_contents,
+    set_session_state, set_target_directory, read_file_content, list_directory_contents,
     ClarifierGenerator
 )
 
@@ -63,7 +63,7 @@ list_directory_contents_tool = FunctionTool(func=list_directory_contents)
 search_code_with_prompt_tool = FunctionTool(func=search_code_with_prompt)
 search_tests_with_prompt_tool = FunctionTool(func=search_tests_with_prompt)
 determine_relevance_from_prompt_tool = FunctionTool(func=determine_relevance_from_prompt)
-set_state_tool = FunctionTool(func=set_state)
+set_state_tool = FunctionTool(func=set_session_state)
 set_target_directory_tool = FunctionTool(func=set_target_directory)
 clarify_questions_tool = FunctionTool(func=ClarifierGenerator())
 
