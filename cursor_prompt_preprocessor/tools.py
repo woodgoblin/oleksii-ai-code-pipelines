@@ -486,37 +486,58 @@ def search_codebase(
 
 # --- Agent Assistance Tools (Placeholders - Refactored for MCP if they were to be implemented) ---
 
-def search_code_with_prompt(target_directory: str, prompt_text: str) -> Dict[str, Any]:
-    """Search code using a prompt (MCP-friendly placeholder).
+def search_code_with_prompt(target_directory: str, prompt_text: str, file_pattern: str = "*.*") -> Dict[str, Any]:
+    """Search code using a prompt (MCP-friendly).
     Args:
         target_directory: The directory to search within.
         prompt_text: The user prompt to guide the search.
+        file_pattern: Glob pattern for files to search (e.g., "*.py", "*.*" ).
     Returns:
-        dict: Placeholder message.
+        dict: Search results or error message.
     """
-    logger.info(f"MCP tool 'search_code_with_prompt' called for dir: {target_directory} with prompt: '{prompt_text[:50]}...'")
-    # In a real implementation, this would use the prompt to derive keywords, patterns,
-    # or use semantic search capabilities.
-    return {
-        "message": "NOT IMPLEMENTED: search_code_with_prompt. Agent should use 'search_codebase' or this needs full implementation.",
-        "target_directory": target_directory,
-        "prompt_received": prompt_text
-        }
+    logger.info(f"MCP tool 'search_code_with_prompt' called for dir: {target_directory} with prompt: '{prompt_text[:50]}...' and pattern: {file_pattern}")
+    # Use the prompt_text as keywords for the search_codebase function.
+    # This is a basic implementation. More sophisticated prompt processing could be added.
+    if not prompt_text or not prompt_text.strip():
+        return {"error": "Prompt text cannot be empty."}
+    
+    # Treat the entire prompt as a comma-separated list of keywords.
+    # For more nuanced search, the prompt could be parsed to extract entities or key phrases.
+    keywords = prompt_text # Or a processed version of prompt_text
+    
+    return search_codebase(
+        target_directory=target_directory,
+        keywords=keywords, # Using the prompt directly as keywords
+        file_pattern=file_pattern, # Use provided file_pattern
+        context_lines=15, # Default context lines
+        ignore_case=True    # Default to ignore case
+    )
 
-def search_tests_with_prompt(target_directory: str, prompt_text: str) -> Dict[str, Any]:
-    """Search test files using a prompt (MCP-friendly placeholder).
+def search_tests_with_prompt(target_directory: str, prompt_text: str, file_pattern: str) -> Dict[str, Any]:
+    """Search test files using a prompt (MCP-friendly).
     Args:
         target_directory: The directory to search tests within.
         prompt_text: The user prompt to guide the test search.
+        file_pattern: Glob pattern for test files to search (e.g., "*test*.py", "*.spec.js").
     Returns:
-        dict: Placeholder message.
+        dict: Search results or error message.
     """
-    logger.info(f"MCP tool 'search_tests_with_prompt' called for dir: {target_directory} with prompt: '{prompt_text[:50]}...'")
-    return {
-        "message": "NOT IMPLEMENTED: search_tests_with_prompt. Agent should use 'search_codebase' with test file patterns or this needs full implementation.",
-        "target_directory": target_directory,
-        "prompt_received": prompt_text
-        }
+    logger.info(f"MCP tool 'search_tests_with_prompt' called for dir: {target_directory} with prompt: '{prompt_text[:50]}...' and pattern: {file_pattern}")
+    
+    if not prompt_text or not prompt_text.strip():
+        return {"error": "Prompt text cannot be empty."}
+    if not file_pattern or not file_pattern.strip():
+        return {"error": "File pattern cannot be empty for searching tests."}
+        
+    keywords = prompt_text # Using the prompt directly as keywords
+    
+    return search_codebase(
+        target_directory=target_directory,
+        keywords=keywords,
+        file_pattern=file_pattern, # Use the agent-provided file pattern
+        context_lines=15,
+        ignore_case=True
+    )
 
 def determine_relevance_from_prompt(prompt_text: str, found_files_context: List[Dict[str, Any]]) -> Dict[str, Any]:
     """MCP Tool (Placeholder): Determine relevance of found files/matches based on a prompt.

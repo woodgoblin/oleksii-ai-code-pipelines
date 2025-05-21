@@ -148,7 +148,7 @@ code_search_agent = create_rate_limited_agent(
     1. Please extract keywords from the user prompt in the session state and use them to search the codebase. 
        You can also pass the raw prompt to help with keyword extraction.
     2. Extract 3-5 key technical terms or concepts from the prompt stored in '{STATE_USER_PROMPT}'
-    3. Use your analysis to find relevant code files using tool search_code_with_prompt()
+    3. Use your analysis to find relevant code files using tool search_code_with_prompt(). You SHOULD provide a specific file_pattern argument if the user prompt or project structure implies a certain file type (e.g., '*.py', '*.java', '*.xml'), otherwise the tool will default to searching all files ('*.*').
     
     Format your response as a clear summary of the most relevant code locations.
 
@@ -175,7 +175,8 @@ test_search_agent = create_rate_limited_agent(
     1. Please extract keywords from the user prompt in the session state and use them to search the test files. 
        You can also pass the raw prompt to help with keyword extraction.
     2. Extract 3-5 key technical terms or concepts from the prompt stored in '{STATE_USER_PROMPT}'
-    3. Use your analysis to find relevant test files using tool search_tests_with_prompt()
+    3. Determine an appropriate file_pattern for test files (e.g., '*test*.py', '*.spec.js', 'tests/*.cs'). Consider the project type if discernible from dependencies or structure. If no specific project type is clear, use a general pattern like '*test*.*' or common language-specific patterns like '*test*.py'.
+    4. Use your analysis and the determined file_pattern to find relevant test files using tool search_tests_with_prompt(). YOU MUST PROVIDE the file_pattern argument.
     
     Format your response as a clear summary of the most relevant test file locations.
     

@@ -129,14 +129,14 @@ def search_project_codebase(
 # --- Placeholder Tool Definitions (Exposed via MCP) ---
 
 @server.tool()
-def search_code_via_prompt(target_directory: str, prompt_text: str) -> Dict[str, Any]:
-    """MCP Tool (Placeholder): Search code using a natural language prompt."""
-    return search_code_with_prompt(target_directory=target_directory, prompt_text=prompt_text)
+def search_code_via_prompt(target_directory: str, prompt_text: str, file_pattern: str = "*.*") -> Dict[str, Any]:
+    """MCP Tool: Search code using a natural language prompt and an optional file pattern."""
+    return search_code_with_prompt(target_directory=target_directory, prompt_text=prompt_text, file_pattern=file_pattern)
 
 @server.tool()
-def search_tests_via_prompt(target_directory: str, prompt_text: str) -> Dict[str, Any]:
-    """MCP Tool (Placeholder): Search test files using a natural language prompt."""
-    return search_tests_with_prompt(target_directory=target_directory, prompt_text=prompt_text)
+def search_tests_via_prompt(target_directory: str, prompt_text: str, file_pattern: str) -> Dict[str, Any]:
+    """MCP Tool: Search test files using a natural language prompt and a specific file pattern."""
+    return search_tests_with_prompt(target_directory=target_directory, prompt_text=prompt_text, file_pattern=file_pattern)
 
 @server.tool()
 def determine_file_relevance_via_prompt(prompt_text: str, found_files_context: List[Dict[str, Any]]) -> Dict[str, Any]:
