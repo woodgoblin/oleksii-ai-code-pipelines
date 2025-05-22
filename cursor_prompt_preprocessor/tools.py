@@ -408,6 +408,24 @@ def search_codebase(
     Returns:
         dict: Search results.
     """
+    # Define skip patterns for directory names and prefixes
+    # These are checked case-insensitively for names, and case-sensitively for prefixes.
+    _SKIPPED_DIR_PREFIXES = ('.', '__') 
+    _SKIPPED_DIR_NAMES = frozenset([
+        'node_modules', 'target', 'build', 'dist', 'out',
+        'venv', '.venv', 'env', '.env', 'nbproject', '.idea',
+        'migrations', 'bin', 'obj', 'logs', 'temp', 'tmp',
+        '.git', '.hg', '.svn', '.bzr', # version control
+        '__pycache__', '.pytest_cache', '.mypy_cache', '.cache', '.tox',
+        'site-packages', # python specific
+        'bower_components', 'jspm_packages', # js specific
+        'vendor', # common for many languages (PHP, Ruby, Go)
+        'buildsrc', # gradle
+        'cmake-build-debug', 'cmake-build-release', # CMake
+        'xcuserdata', # Xcode
+        '.ds_store' # macOS specific file/folder often found
+    ])
+
     try:
         if not target_directory or not os.path.isdir(target_directory):
             return {"error": f"Invalid target_directory: {target_directory}"}
@@ -421,14 +439,46 @@ def search_codebase(
 
         logger.info(f"Searching in {target_directory} for keywords: {keyword_list} (pattern: {file_pattern})")
         
-        # Walk through the target_directory
-        for root, _, files_in_dir in os.walk(target_directory):
-            # TODO: Consider respecting .gitignore here for efficiency, though filter_by_gitignore is separate
-            # For now, it searches all non-hidden unless gitignored explicitly by pattern or other means.
-            # A common pattern is to skip directories like .git, .venv, __pycache__ early.
-            if any(part.startswith('.') for part in root.replace(target_directory, '').split(os.sep)): # crude skip hidden dirs
-                continue
+        norm_target_dir_path = os.path.normpath(target_directory)
 
+        # Walk through the target_directory, topdown=True allows modifying `dirs` to prune traversal
+        for root, dirs, files_in_dir in os.walk(target_directory, topdown=True):
+            norm_root_path = os.path.normpath(root)
+
+            # Part 1: Check if the current 'root' directory itself (relative to target_dir)
+            # is part of a path that should be skipped.
+            skip_current_root_processing = False
+            if norm_root_path != norm_target_dir_path:
+                relative_path_from_target = os.path.relpath(norm_root_path, norm_target_dir_path)
+                # Path components of the current root relative to the target directory
+                path_components = relative_path_from_target.split(os.sep)
+                
+                for component in path_components:
+                    if not component or component == '.': # Skip empty or current dir components
+                        continue
+                    if component.startswith(_SKIPPED_DIR_PREFIXES) or \
+                       component.lower() in _SKIPPED_DIR_NAMES:
+                        skip_current_root_processing = True
+                        break
+            
+            if skip_current_root_processing:
+                logger.debug(f"Skipping directory and its contents: {norm_root_path} due to matching a skip pattern in its path.")
+                dirs[:] = []  # Don't descend into subdirectories of this skipped root.
+                continue      # Skip processing files in this root and this iteration of os.walk.
+
+            # Part 2: Prune subdirectories from 'dirs' based on their names.
+            # This filters out dirs like '.git', '__pycache__', 'node_modules' directly under the current 'root'.
+            original_dirs_len = len(dirs)
+            dirs[:] = [d_name for d_name in dirs if not (
+                            d_name.startswith(_SKIPPED_DIR_PREFIXES) or \
+                            d_name.lower() in _SKIPPED_DIR_NAMES
+                        )]
+            
+            if len(dirs) != original_dirs_len:
+                pruned_count = original_dirs_len - len(dirs)
+                logger.debug(f"Pruned {pruned_count} subdirectories from further traversal under {norm_root_path}")
+
+            # Process files in the current, non-skipped directory
             for file_name in files_in_dir:
                 if not glob.fnmatch.fnmatch(file_name, file_pattern):
                     continue
