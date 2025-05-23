@@ -52,6 +52,9 @@ def setup_logging():
         logging.Logger: Configured logger instance
     """
     # Create logs directory if it doesn't exist
+    # __file__ is .../coding-prompt-preprocessor/common/logging_setup.py
+    # os.path.dirname(os.path.abspath(__file__)) is .../coding-prompt-preprocessor/common
+    # os.path.dirname(os.path.dirname(os.path.abspath(__file__))) is .../coding-prompt-preprocessor (project_root)
     log_dir = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), 'logs')
     os.makedirs(log_dir, exist_ok=True)
     

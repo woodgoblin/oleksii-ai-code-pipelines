@@ -13,7 +13,7 @@ import json
 from typing import Optional, Dict, Any, List, Union
 
 from cursor_prompt_preprocessor.config import STATE_TARGET_DIRECTORY, STATE_QUESTIONS
-from cursor_prompt_preprocessor.logging_setup import logger
+from common.logging_setup import logger
 from cursor_prompt_preprocessor.session import session_manager
 
 # --- New MCP-friendly Clarification Tool ---

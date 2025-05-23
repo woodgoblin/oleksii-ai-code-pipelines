@@ -2,7 +2,7 @@
 
 from google.adk.sessions import InMemorySessionService
 from cursor_prompt_preprocessor.config import APP_NAME, USER_ID, SESSION_ID
-from cursor_prompt_preprocessor.logging_setup import logger
+from common.logging_setup import logger
 from typing import Dict, Any, Optional
 
 class SessionManager:

@@ -3,8 +3,8 @@ import os
 import uvicorn.config
 
 # Add the project root to sys.path to allow absolute imports
-# __file__ is .../coding-prompt-preprocessor/cursor_prompt_preprocessor/mcp_server.py
-# os.path.dirname(__file__) is .../coding-prompt-preprocessor/cursor_prompt_preprocessor
+# __file__ is .../coding-prompt-preprocessor/common/mcp_server.py
+# os.path.dirname(__file__) is .../coding-prompt-preprocessor/common
 # project_root is .../coding-prompt-preprocessor
 project_root = os.path.abspath(os.path.join(os.path.dirname(__file__), '..'))
 if project_root not in sys.path:
@@ -25,14 +25,14 @@ if hasattr(uvicorn.config, "LOGGING_CONFIG"):
 # --- End Uvicorn Logging Configuration ---
 
 """
-MCP Server for Cursor Prompt Preprocessor Tools.
+MCP Server for Common Tools.
 
-This server exposes the functionalities in tools.py via the Model Context Protocol.
+This server exposes the functionalities in common/tools.py via the Model Context Protocol.
 """
 from mcp.server.fastmcp import FastMCP
 from typing import Dict, Any, List, Optional
 
-from cursor_prompt_preprocessor.tools import (
+from common.tools import (
     ask_human_clarification_mcp,
     scan_project_structure,
     set_target_directory,
@@ -45,13 +45,13 @@ from cursor_prompt_preprocessor.tools import (
     search_tests_with_prompt,
     determine_relevance_from_prompt,
 )
-from cursor_prompt_preprocessor.logging_setup import logger
+from common.logging_setup import logger
 
 # Initialize MCP Server
 server = FastMCP(
-    "CursorPromptPreprocessorTools",
+    "CommonToolsServer", # Updated name
     version="0.1.0",
-    description="Provides tools for project analysis and interaction for LLM agents."
+    description="Provides common tools for project analysis and interaction for LLM agents."
 )
 
 # --- Tool Definitions ---
@@ -145,12 +145,12 @@ def determine_file_relevance_via_prompt(prompt_text: str, found_files_context: L
 
 # To run this server:
 # Ensure you are in the root of the `coding-prompt-preprocessor` directory.
-# Execute: mcp dev cursor_prompt_preprocessor/mcp_server.py
+# Execute: mcp dev common/mcp_server.py
 
 if __name__ == "__main__":
     logger.info("MCP Server definition loaded.")
     print("To run this MCP server, navigate to the project root directory and execute:")
-    print("mcp dev cursor_prompt_preprocessor/mcp_server.py")
+    print("mcp dev common/mcp_server.py")
     print("Ensure your Python environment with 'mcp[cli]' is active.") 
 
-    server.run(transport="streamable-http")
+    server.run(transport="streamable-http") 

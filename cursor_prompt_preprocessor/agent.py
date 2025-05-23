@@ -16,9 +16,9 @@ from cursor_prompt_preprocessor.config import (
     STATE_RELEVANCE_SCORES, STATE_QUESTIONS, STATE_ANSWERS, STATE_FINAL_CONTEXT,
     STATE_TARGET_DIRECTORY, NO_QUESTIONS
 )
-from cursor_prompt_preprocessor.logging_setup import logger
-from cursor_prompt_preprocessor.rate_limiting import pre_model_rate_limit, handle_rate_limit
-from cursor_prompt_preprocessor.tools import (
+from common.logging_setup import logger
+from common.rate_limiting import pre_model_rate_limit, handle_rate_limit
+from common.tools import (
     scan_project_structure, get_dependencies, apply_gitignore_filter,
     search_code_with_prompt, search_tests_with_prompt, determine_relevance_from_prompt,
     set_session_state, set_target_directory, read_file_content, list_directory_contents,
