@@ -12,18 +12,20 @@ import gitignore_parser
 import json
 from typing import Optional, Dict, Any, List, Union
 
+from google.adk.tools import ToolContext
+
 from cursor_prompt_preprocessor.config import STATE_TARGET_DIRECTORY, STATE_QUESTIONS
 from common.logging_setup import logger
-from cursor_prompt_preprocessor.session import session_manager
 
 # --- New MCP-friendly Clarification Tool ---
-def ask_human_clarification_mcp(question_to_ask: str) -> Dict[str, str]:
+def ask_human_clarification_mcp(question_to_ask: str, tool_context: ToolContext | None = None) -> Dict[str, str]:
     """Get clarification from the user via console input.
     
     This version is intended to be used as an MCP tool, taking the question directly.
     
     Args:
         question_to_ask: The question to ask the user.
+        tool_context: The ADK tool context.
         
     Returns:
         dict: The user's reply.
@@ -39,19 +41,25 @@ class ClarifierGenerator:
     '''Synchronous function to get console input for clarification.'''
     __name__ = "clarify_questions_tool"  # Name for agent instructions
 
-    def __call__(self) -> dict:
+    def __call__(self, tool_context: ToolContext | None = None) -> dict:
         """Get clarification from the user via console input.
         
         Retrieves the question from session state and prompts the user for input.
         
+        Args:
+            tool_context: The ADK tool context.
+            
         Returns:
             dict: The user's reply
         """
-        # Get the question from the state
-        question_to_ask = session_manager.get_state(
-            STATE_QUESTIONS, 
-            "Could you please provide clarification? (Error: Question not found in state)"
-        )
+        question_to_ask = "Could you please provide clarification? (Error: Question not found in state)"
+        if tool_context and hasattr(tool_context, 'state'):
+            question_to_ask = tool_context.state.get(
+                STATE_QUESTIONS, 
+                "Could you please provide clarification? (Error: Question not found in state from context)"
+            )
+        else:
+            logger.warning("ClarifierGenerator: ToolContext or tool_context.state not available, using default question.")
         
         # Prompt the user directly in the console where the agent is running
         print("--- CONSOLE INPUT REQUIRED ---")
@@ -65,19 +73,26 @@ class ClarifierGenerator:
 # --- File System Tools (Refactored for MCP) ---
 
 # This function remains for agent-side use to get the state if needed
-def get_target_directory_from_state() -> str:
+def get_target_directory_from_state(tool_context: ToolContext | None = None) -> str:
     """Get the target directory from the session state.
     
+    Args:
+        tool_context: The ADK tool context.
+
     Returns:
         str: The target directory path, or "." if not set.
     """
-    return session_manager.get_state(STATE_TARGET_DIRECTORY, ".")
+    if tool_context and hasattr(tool_context, 'state'):
+        return tool_context.state.get(STATE_TARGET_DIRECTORY, ".")
+    logger.warning("get_target_directory_from_state: ToolContext or tool_context.state not available, returning default '.'")
+    return "."
 
-def get_project_structure(base_directory: str) -> Dict[str, Any]:
+def get_project_structure(base_directory: str, tool_context: ToolContext | None = None) -> Dict[str, Any]:
     """Scan a directory and return its structure recursively.
 
     Args:
         base_directory: The directory to scan.
+        tool_context: The ADK tool context.
 
     Returns:
         dict: A dictionary representation of the project structure.
@@ -94,17 +109,18 @@ def get_project_structure(base_directory: str) -> Dict[str, Any]:
                 structure["files"].append(item)
             elif os.path.isdir(item_path) and not item.startswith("."): # Exclude .git, .venv etc.
                 # Recursive call should also use the absolute/correct path context
-                structure["directories"][item] = get_project_structure(item_path)
+                structure["directories"][item] = get_project_structure(item_path, tool_context)
         return structure
     except Exception as e:
         logger.error(f"Error getting project structure for {current_scan_directory}: {str(e)}")
         return {"error": str(e), "path_scanned": current_scan_directory}
 
-def scan_project_structure(target_directory: str) -> Dict[str, Any]:
+def scan_project_structure(target_directory: str, tool_context: ToolContext | None = None) -> Dict[str, Any]:
     """Scan the target directory's structure. (MCP-friendly)
     
     Args:
         target_directory: The root directory to scan.
+        tool_context: The ADK tool context.
     
     Returns:
         dict: A dictionary representation of the project structure.
@@ -112,35 +128,43 @@ def scan_project_structure(target_directory: str) -> Dict[str, Any]:
     if not target_directory or not os.path.isdir(target_directory):
         logger.error(f"Invalid target_directory for scan_project_structure: {target_directory}")
         return {"error": f"Invalid or non-existent directory: {target_directory}"}
-    return get_project_structure(target_directory)
+    return get_project_structure(target_directory, tool_context)
 
-def set_target_directory(directory: str) -> Dict[str, str]:
+def set_target_directory(directory: str, tool_context: ToolContext | None = None) -> Dict[str, str]:
     """Set the target directory for code analysis (MCP version).
     
     This MCP tool primarily validates and returns the directory. 
-    The calling agent is responsible for managing this state in its session.
+    The calling agent is responsible for managing this state in its session using the tool_context.
     
     Args:
         directory: The directory path to analyze.
+        tool_context: The ADK tool context.
         
     Returns:
         dict: A confirmation message with the directory.
     """
-    # Basic validation (can be expanded)
-    # For MCP tool, it might just acknowledge the path.
-    # If it needs to be stored server-side for a specific MCP session, that's more complex.
-    # For now, it just returns it, and the agent handles session state.
     logger.info(f"MCP tool 'set_target_directory' called with: {directory}")
-    return {
-        "status": "acknowledged", 
-        "message": f"Target directory acknowledged by MCP tool: {directory}",
-        "directory_set": directory # The agent can use this to update its state
-    }
+    if tool_context and hasattr(tool_context, 'state'):
+        tool_context.state[STATE_TARGET_DIRECTORY] = directory
+        logger.info(f"Target directory set in session state: {directory}")
+        return {
+            "status": "success", 
+            "message": f"Target directory set in session state: {directory}",
+            "directory_set": directory
+        }
+    else:
+        logger.warning("set_target_directory: ToolContext or tool_context.state not available. Directory not set in session state.")
+        return {
+            "status": "warning", 
+            "message": f"Target directory acknowledged by MCP tool: {directory}. State not updated (no context).",
+            "directory_set": directory
+        }
 
 def list_directory_contents(
     path_to_list: str, 
     base_dir_context: str, 
-    include_hidden: bool = False
+    include_hidden: bool = False,
+    tool_context: ToolContext | None = None
 ) -> Dict[str, Any]:
     """List contents of a directory with detailed information (MCP-friendly).
     
@@ -148,6 +172,7 @@ def list_directory_contents(
         path_to_list: Path to list (can be relative to base_dir_context).
         base_dir_context: The base directory context for resolving relative paths.
         include_hidden: Whether to include hidden files/directories (default: False)
+        tool_context: The ADK tool context.
         
     Returns:
         dict: Directory contents with metadata
@@ -208,7 +233,8 @@ def read_file_content(
     file_path_to_read: str, 
     base_dir_context: str,
     start_line: Optional[int] = None, 
-    end_line: Optional[int] = None
+    end_line: Optional[int] = None,
+    tool_context: ToolContext | None = None
 ) -> Dict[str, Any]:
     """Read the contents of a file (MCP-friendly).
     
@@ -217,6 +243,7 @@ def read_file_content(
         base_dir_context: The base directory context for resolving relative file paths.
         start_line: Optional 1-based start line number (inclusive).
         end_line: Optional 1-based end line number (inclusive).
+        tool_context: The ADK tool context.
         
     Returns:
         dict: File content and metadata.
@@ -267,134 +294,147 @@ def read_file_content(
 
 # --- Project Analysis Tools (Refactored for MCP) ---
 
-def get_dependencies(target_directory: str) -> Dict[str, Any]:
+def get_dependencies(target_directory: str, tool_context: ToolContext | None = None) -> Dict[str, Any]:
     """Analyze project dependencies (MCP-friendly).
 
     Args:
         target_directory: The root project directory.
+        tool_context: The ADK tool context.
 
     Returns:
-        dict: A dictionary of project dependencies.
+        dict: Analysis of dependencies or error message.
     """
-    if not target_directory or not os.path.isdir(target_directory):
-        return {"error": f"Invalid target_directory: {target_directory}"}
-    
+    logger.info(f"Getting dependencies for directory: {target_directory}")
     dependencies = {}
-    req_path = os.path.join(target_directory, "requirements.txt")
-    if os.path.exists(req_path):
-        with open(req_path, "r", encoding='utf-8') as file:
-            for line in file:
-                line = line.strip()
-                if line and not line.startswith("#"):
-                    # Improved parsing for various specifiers
-                    name = line.split(">=")[0].split("==")[0].split("<=")[0].split("!=")[0].split("~=")[0].split("<")[0].split(">")[0].strip()
-                    version_spec = line[len(name):].strip()
-                    dependencies[name] = version_spec if version_spec else "any"
-    
-    pkg_path = os.path.join(target_directory, "package.json")
-    if os.path.exists(pkg_path):
-        try:
-            with open(pkg_path, "r", encoding='utf-8') as file:
-                package_data = json.load(file)
-            if "dependencies" in package_data:
-                dependencies.update(package_data["dependencies"])
-            if "devDependencies" in package_data: # Often good to know these too
-                dependencies.update({f"dev_{k}": v for k, v in package_data["devDependencies"].items()})
-        except json.JSONDecodeError:
-            logger.warning(f"Invalid package.json format in {target_directory}")
-            dependencies["package_json_error"] = "Invalid package.json format"
-    
-    if not dependencies and "package_json_error" not in dependencies:
-        logger.info(f"No common dependency files found in {target_directory}")
-        return {"message": "No common dependency files (requirements.txt, package.json) found or parsed.", "path_checked": target_directory}
+    found_any = False
 
+    # Python: requirements.txt
+    try:
+        req_path = os.path.join(target_directory, "requirements.txt")
+        if os.path.exists(req_path):
+            with open(req_path, 'r') as f:
+                dependencies["python_requirements_txt"] = [line.strip() for line in f if line.strip() and not line.startswith('#')]
+            found_any = True
+            logger.info(f"Found and parsed {req_path}")
+    except Exception as e:
+        logger.error(f"Error parsing requirements.txt in {target_directory}: {str(e)}")
+        dependencies["python_requirements_txt_error"] = str(e)
+
+    # Node.js: package.json
+    try:
+        pkg_path = os.path.join(target_directory, "package.json")
+        if os.path.exists(pkg_path):
+            with open(pkg_path, 'r') as f:
+                pkg_data = json.load(f)
+                dependencies["nodejs_package_json"] = {
+                    "dependencies": pkg_data.get("dependencies", {}),
+                    "devDependencies": pkg_data.get("devDependencies", {})
+                }
+            found_any = True
+            logger.info(f"Found and parsed {pkg_path}")
+    except Exception as e:
+        logger.error(f"Error parsing package.json in {target_directory}: {str(e)}")
+        dependencies["nodejs_package_json_error"] = str(e)
+
+    # TODO: Add support for other common dependency files (pom.xml, build.gradle, Gemfile, etc.)
+
+    if not found_any:
+        return {"message": "No common dependency files (requirements.txt, package.json) found.", "path_checked": target_directory}
+    
     return {"dependencies": dependencies, "path_checked": target_directory}
 
 
-def filter_by_gitignore(target_directory: str) -> Dict[str, Any]:
+def filter_by_gitignore(target_directory: str, tool_context: ToolContext | None = None) -> Dict[str, Any]:
     """Filter a project structure based on gitignore rules (MCP-friendly).
     
     Args:
         target_directory: The root project directory containing .gitignore.
+        tool_context: The ADK tool context.
 
     Returns:
-        dict: Filtered project structure or error.
+        dict: Filtered project structure or error message.
     """
+    logger.info(f"Filtering project structure by .gitignore in: {target_directory}")
+    
+    gitignore_path = os.path.join(target_directory, ".gitignore")
+    matches_gitignore = None
+    
+    if os.path.exists(gitignore_path):
+        try:
+            # base_dir should be the directory containing the .gitignore file
+            matches_gitignore = gitignore_parser.parse_gitignore(gitignore_path, base_dir=target_directory)
+            logger.info(f"Successfully parsed .gitignore: {gitignore_path}")
+        except Exception as e:
+            logger.error(f"Error parsing .gitignore file at {gitignore_path}: {str(e)}")
+            return {"error": f"Error parsing .gitignore: {str(e)}", "path_checked": target_directory}
+    else:
+        logger.info(f"No .gitignore file found in {target_directory}. No filtering will be applied based on it.")
+        # If no .gitignore, create a dummy matcher that matches nothing, effectively keeping all files
+        def no_match(_):
+            return False
+        matches_gitignore = no_match
+
     try:
-        if not target_directory or not os.path.isdir(target_directory):
-            return {"error": f"Invalid target_directory: {target_directory}"}
-            
-        # Get the full structure first
         # IMPORTANT: get_project_structure needs to work relative to the actual files,
         # so we pass target_directory to it.
-        initial_structure = get_project_structure(target_directory)
+        initial_structure = get_project_structure(target_directory, tool_context) # Pass tool_context
         if "error" in initial_structure:
              return {"error": f"Could not get project structure for gitignore filtering: {initial_structure['error']}", "path_checked": target_directory}
 
-        gitignore_path = os.path.join(target_directory, ".gitignore")
-        if not os.path.exists(gitignore_path):
-            logger.info(f".gitignore not found in {target_directory}, returning full structure.")
-            return {"filtered_structure": initial_structure, "gitignore_status": "not_found", "path_checked": target_directory}
-        
-        # Base path for gitignore_parser should be the directory containing .gitignore
-        matches = gitignore_parser.parse_gitignore(gitignore_path, base_dir=os.path.abspath(target_directory))
-        
-        # Helper function to filter structure. Paths passed to 'matches' must be relative to target_directory
-        # or absolute, matching how parse_gitignore was initialized if base_dir was used correctly.
-        # Using os.path.relpath for consistency if paths in structure are absolute.
-        # Or, ensure paths constructed are relative to target_directory from the start.
-        
         # Let's ensure paths used for matching are relative to the gitignore file's location (target_directory)
-        def filter_recursive(current_struct: Dict[str, Any], current_path_relative_to_target: str) -> Dict[str, Any]:
-            filtered_sub_structure = {"files": [], "directories": {}}
+        def filter_recursive(current_struct: Dict[str, Any], current_path_from_target_root: str) -> Dict[str, Any]:
+            filtered_struct = {"files": [], "directories": {}}
             
+            # Filter files
             for file_name in current_struct.get("files", []):
-                # Construct path relative to target_directory for matching
-                path_to_check = os.path.join(current_path_relative_to_target, file_name)
-                # gitignore_parser expects paths relative to the .gitignore location
-                # or absolute if base_dir was used correctly.
-                # For paths from os.walk or similar, they might be absolute already.
-                # If using base_dir with parse_gitignore, it handles this.
-                # Let's make path_to_check absolute then let 'matches' handle it.
-                abs_path_to_check = os.path.abspath(os.path.join(target_directory, path_to_check))
+                # Path relative to target_directory (where .gitignore is)
+                relative_file_path = os.path.join(current_path_from_target_root, file_name)
+                # gitignore_parser needs paths to be absolute if base_dir was used, or relative to CWD if not.
+                # Since we used base_dir=target_directory, we should provide absolute paths for matching.
+                absolute_file_path = os.path.join(target_directory, relative_file_path)
+                if not matches_gitignore(absolute_file_path):
+                    filtered_struct["files"].append(file_name)
+            
+            # Filter directories
+            for dir_name, dir_content in current_struct.get("directories", {}).items():
+                relative_dir_path = os.path.join(current_path_from_target_root, dir_name)
+                absolute_dir_path = os.path.join(target_directory, relative_dir_path)
 
-                if not matches(abs_path_to_check):
-                    filtered_sub_structure["files"].append(file_name)
-            
-            for dir_name, dir_sub_struct in current_struct.get("directories", {}).items():
-                path_to_check = os.path.join(current_path_relative_to_target, dir_name)
-                abs_path_to_check = os.path.abspath(os.path.join(target_directory, path_to_check))
-                
-                if not matches(abs_path_to_check):
-                    filtered_sub_structure["directories"][dir_name] = filter_recursive(dir_sub_struct, path_to_check)
-            
-            return filtered_sub_structure
-        
+                if not matches_gitignore(absolute_dir_path):
+                    # Recursively filter subdirectory content
+                    filtered_struct["directories"][dir_name] = filter_recursive(
+                        dir_content, 
+                        relative_dir_path # Pass the updated relative path for the next level
+                    )
+            return filtered_struct
+
         # Start filtering from the root of the structure, with an empty relative path initially
         filtered_result = filter_recursive(initial_structure, "") 
-        return {"filtered_structure": filtered_result, "gitignore_status": "applied", "path_checked": target_directory}
+        return {"filtered_structure": filtered_result, "gitignore_status": "applied" if os.path.exists(gitignore_path) else "not_found", "path_checked": target_directory}
 
     except Exception as e:
         logger.error(f"Error filtering by gitignore for {target_directory}: {str(e)}")
         return {"error": f"Error filtering by gitignore: {str(e)}", "path_checked": target_directory}
 
-def apply_gitignore_filter(target_directory: str) -> Dict[str, Any]:
+def apply_gitignore_filter(target_directory: str, tool_context: ToolContext | None = None) -> Dict[str, Any]:
     """Apply gitignore filtering to the project structure (MCP-friendly wrapper).
     
     Args:
         target_directory: The root project directory.
+        tool_context: The ADK tool context.
         
     Returns:
         dict: Filtered project structure.
     """
-    return filter_by_gitignore(target_directory)
+    return filter_by_gitignore(target_directory, tool_context)
 
 def search_codebase(
     target_directory: str,
     keywords: str, # comma-separated
     file_pattern: str = "*.*", # Glob pattern
     context_lines: int = 15,
-    ignore_case: bool = True
+    ignore_case: bool = True,
+    tool_context: ToolContext | None = None
 ) -> Dict[str, Any]:
     """Search the codebase for keywords (MCP-friendly).
     
@@ -404,6 +444,7 @@ def search_codebase(
         file_pattern: Glob pattern for files to search.
         context_lines: Number of lines before/after match.
         ignore_case: Whether to ignore case.
+        tool_context: The ADK tool context.
         
     Returns:
         dict: Search results.
@@ -536,12 +577,13 @@ def search_codebase(
 
 # --- Agent Assistance Tools (Placeholders - Refactored for MCP if they were to be implemented) ---
 
-def search_code_with_prompt(target_directory: str, prompt_text: str, file_pattern: str = "*.*") -> Dict[str, Any]:
+def search_code_with_prompt(target_directory: str, prompt_text: str, file_pattern: str = "*.*", tool_context: ToolContext | None = None) -> Dict[str, Any]:
     """Search code using a prompt (MCP-friendly).
     Args:
         target_directory: The directory to search within.
         prompt_text: The user prompt to guide the search.
         file_pattern: Glob pattern for files to search (e.g., "*.py", "*.*" ).
+        tool_context: The ADK tool context.
     Returns:
         dict: Search results or error message.
     """
@@ -560,15 +602,17 @@ def search_code_with_prompt(target_directory: str, prompt_text: str, file_patter
         keywords=keywords, # Using the prompt directly as keywords
         file_pattern=file_pattern, # Use provided file_pattern
         context_lines=15, # Default context lines
-        ignore_case=True    # Default to ignore case
+        ignore_case=True,    # Default to ignore case
+        tool_context=tool_context # Pass tool_context
     )
 
-def search_tests_with_prompt(target_directory: str, prompt_text: str, file_pattern: str) -> Dict[str, Any]:
+def search_tests_with_prompt(target_directory: str, prompt_text: str, file_pattern: str, tool_context: ToolContext | None = None) -> Dict[str, Any]:
     """Search test files using a prompt (MCP-friendly).
     Args:
         target_directory: The directory to search tests within.
         prompt_text: The user prompt to guide the test search.
         file_pattern: Glob pattern for test files to search (e.g., "*test*.py", "*.spec.js").
+        tool_context: The ADK tool context.
     Returns:
         dict: Search results or error message.
     """
@@ -586,15 +630,17 @@ def search_tests_with_prompt(target_directory: str, prompt_text: str, file_patte
         keywords=keywords,
         file_pattern=file_pattern, # Use the agent-provided file pattern
         context_lines=15,
-        ignore_case=True
+        ignore_case=True,
+        tool_context=tool_context # Pass tool_context
     )
 
-def determine_relevance_from_prompt(prompt_text: str, found_files_context: List[Dict[str, Any]]) -> Dict[str, Any]:
+def determine_relevance_from_prompt(prompt_text: str, found_files_context: List[Dict[str, Any]], tool_context: ToolContext | None = None) -> Dict[str, Any]:
     """MCP Tool (Placeholder): Determine relevance of found files/matches based on a prompt.
     
     Args:
         prompt_text: The user's prompt.
         found_files_context: Contextual information about files/matches.
+        tool_context: The ADK tool context.
         
     Returns:
         dict: Relevance scores or analysis.
@@ -611,7 +657,7 @@ def determine_relevance_from_prompt(prompt_text: str, found_files_context: List[
 
 # --- Session State Tools (Refactored for MCP) ---
 
-def set_session_state(key: str, value_json_str: str) -> Dict[str, str]:
+def set_session_state(key: str, value_json_str: str, tool_context: ToolContext | None = None) -> Dict[str, str]:
     """Store a key-value pair in the session state. (MCP-friendly wrapper)
     
     Args:
@@ -620,32 +666,49 @@ def set_session_state(key: str, value_json_str: str) -> Dict[str, str]:
                         If the original value is a simple string, it can be passed directly
                         (it will be valid JSON if not containing special characters, or pass as a JSON string e.g. "mystring").
                         For dicts or lists, serialize to JSON first before calling this tool.
+        tool_context: The ADK tool context.
         
     Returns:
         dict: A status message.
     """
-    actual_value: Any
+    logger.info(f"MCP tool 'set_session_state' called for key: '{key}'")
     try:
-        # Attempt to parse as JSON. This allows storing complex types.
         actual_value = json.loads(value_json_str)
-    except json.JSONDecodeError:
-        # If it's not valid JSON, store it as a plain string.
-        # This handles cases where a simple string (not JSON-encoded) is passed.
-        actual_value = value_json_str
+    except json.JSONDecodeError as e:
+        logger.error(f"Error decoding JSON for set_session_state key '{key}': {str(e)}")
+        return {"status": "error", "message": f"Invalid JSON format for value: {str(e)}"}
 
-    session_manager.set_state(key, actual_value)
-    logger.info(f"State set via MCP tool: Key='{key}', Type='{type(actual_value).__name__}' was set. Original string: '{value_json_str[:100]}...'")
-    return {"status": "success", "key_set": key, "value_type": type(actual_value).__name__}
+    if tool_context and hasattr(tool_context, 'state'):
+        try:
+            tool_context.state[key] = actual_value
+            logger.info(f"State set for key '{key}' via ToolContext.")
+            return {"status": "success", "message": f"State successfully set for key '{key}'"}
+        except Exception as e:
+            logger.error(f"Error setting state via ToolContext for key '{key}': {str(e)}")
+            return {"status": "error", "message": f"Failed to set state via ToolContext: {str(e)}"}
+    else:
+        logger.warning(f"ToolContext or tool_context.state not available for set_session_state key '{key}'. State not set.")
+        # In a pure MCP scenario without agent state, this might just acknowledge.
+        # However, ADK agents rely on this for their state.
+        return {"status": "warning", "message": f"ToolContext or state not available. State for key '{key}' not set in ADK session."}
 
 
-def get_session_state(key: str, default: Optional[Any] = None) -> Any:
+def get_session_state(key: str, default: Optional[Any] = None, tool_context: ToolContext | None = None) -> Any:
     """Get a value from the session state.
     
     Args:
         key: The state key to retrieve.
         default: The default value to return if the key is not found.
+        tool_context: The ADK tool context.
     
     Returns:
         Any: The retrieved value or the default if the key is not found.
     """
-    return session_manager.get_state(key, default) 
+    logger.info(f"MCP tool 'get_session_state' called for key: '{key}'")
+    if tool_context and hasattr(tool_context, 'state'):
+        value = tool_context.state.get(key, default)
+        logger.info(f"Retrieved state for key '{key}' via ToolContext.")
+        return value
+    else:
+        logger.warning(f"ToolContext or tool_context.state not available for get_session_state key '{key}'. Returning default.")
+        return default 

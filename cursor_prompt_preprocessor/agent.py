@@ -25,26 +25,33 @@ from common.tools import (
     ClarifierGenerator
 )
 
+# Universal negative constraint preamble for all LLM agent instructions
+AGENT_INSTRUCTION_PREAMBLE = """IMPORTANT: You are an analytical assistant. Your capabilities are strictly limited to understanding, analyzing, and searching existing code and project structures using ONLY the tools explicitly provided to you. You CANNOT create, write, modify, or delete files or directories. You CANNOT execute code or terminal commands unless a specific tool for that exact purpose is provided. If you believe a file needs to be created or modified, or another action outside your toolset is required, state this as a suggestion or finding in your textual response, but DO NOT attempt to perform the action or call a non-existent tool for it. Adhere strictly to your designated role and available tools."""
+
 def create_rate_limited_agent(name, model, instruction, tools=None, output_key=None, sub_agents=None):
-    """Create an LlmAgent with rate limiting applied.
+    """Create an LlmAgent with rate limiting and universal constraints applied.
     
-    Factory function to ensure all agents have consistent rate limiting.
+    Factory function to ensure all agents have consistent rate limiting and adhere
+    to fundamental operational constraints.
     
     Args:
         name: Agent name
         model: Model name
-        instruction: Agent instructions
+        instruction: Agent-specific instructions
         tools: List of tools
         output_key: Output state key
         sub_agents: List of sub-agents
     
     Returns:
-        LlmAgent with rate limiting applied
+        LlmAgent with rate limiting and universal constraints.
     """
+    
+    full_instruction = AGENT_INSTRUCTION_PREAMBLE + "\n\n" + instruction
+
     return LlmAgent(
         name=name,
         model=model,
-        instruction=instruction,
+        instruction=full_instruction, # Use the prepended instruction
         tools=tools or [],
         output_key=output_key,
         sub_agents=sub_agents or [],
@@ -65,7 +72,13 @@ search_tests_with_prompt_tool = FunctionTool(func=search_tests_with_prompt)
 determine_relevance_from_prompt_tool = FunctionTool(func=determine_relevance_from_prompt)
 set_state_tool = FunctionTool(func=set_session_state)
 set_target_directory_tool = FunctionTool(func=set_target_directory)
-clarify_questions_tool = FunctionTool(func=ClarifierGenerator())
+
+# Wrapper for ClarifierGenerator to ensure correct tool name registration
+def clarifier_generator_callable():
+    return ClarifierGenerator().__call__()
+clarifier_generator_callable.__name__ = "clarify_questions_tool"
+
+clarify_questions_tool = FunctionTool(func=clarifier_generator_callable)
 
 # --- LLM Agents ---
 
@@ -248,22 +261,21 @@ user_answer_collection_agent = create_rate_limited_agent(
     name="UserAnswerCollectionAgent",
     model=GEMINI_MODEL,
     instruction=f"""
-    You are a User Answer Collector.
-    Your task is based on the content of the state key '{STATE_QUESTIONS}':
-    
-    1. Check if the value in '{STATE_QUESTIONS}' is EXACTLY the string "{NO_QUESTIONS}".
-    2. Report clearly: State whether questions were found or not.
-    3. If questions exist (i.e., the state is NOT "{NO_QUESTIONS}"):
-        a. Announce that you will now ask for clarification via the console tool, showing the question stored in the state.
-        b. Use the `clarify_questions_tool` to get console input.
-        c. Retrieve the current list of answers from the state key '{STATE_ANSWERS}' 
-        d. MUST Append the new 'reply' received from the tool to this list.
-        e. MUST Call `set_state` to store the updated list back into the '{STATE_ANSWERS}' state key.
-    4. If no questions exist (i.e., the state IS "{NO_QUESTIONS}"):
-        a. Announce that no clarification is needed and the loop should terminate.
-        b. Respond EXACTLY with the string "NO_CLARIFICATION_NEEDED_EXIT_LOOP"
-        
-    Ensure you handle the state correctly, especially creating the list for '{STATE_ANSWERS}' if it's the first answer.
+    You are a User Answer Collector. Your SOLE PURPOSE is to collect answers to questions using the 'clarify_questions_tool' and store them using the 'set_state' tool. Follow these steps PRECISELY:
+
+    1.  Examine the state key '{STATE_QUESTIONS}'.
+    2.  IF the value in '{STATE_QUESTIONS}' is EXACTLY the string "{NO_QUESTIONS}":
+        a.  Your response MUST be ONLY the exact string "NO_CLARIFICATION_NEEDED_EXIT_LOOP".
+        b.  Terminate the loop.
+    3.  ELSE (questions exist):
+        a.  Your textual response should state that you are asking the questions found in '{STATE_QUESTIONS}'.
+        b.  Then, you MUST make a function call to `clarify_questions_tool` with no arguments.
+        c.  After `clarify_questions_tool` returns a 'reply', you MUST then make a function call to `set_state`.
+            The `set_state` call must use '{STATE_ANSWERS}' as the key.
+            The value for `set_state` must be the existing list from '{STATE_ANSWERS}' (or a new list if none exists) with the new 'reply' appended to it. Ensure the value is a JSON string representing the list.
+        d.  DO NOT make any other function calls. Your turn ends after the `set_state` call.
+
+    Strictly adhere to this logic. Do not deviate. Only call `clarify_questions_tool` and then `set_state` if questions exist. Otherwise, output the exact exit string and make NO function calls.
     """,
     tools=[
         clarify_questions_tool, 
