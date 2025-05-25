@@ -4,7 +4,7 @@
 APP_NAME = "cursor_prompt_preprocessor"
 USER_ID = "demo_user"
 SESSION_ID = "demo_session"
-GEMINI_MODEL = "gemini-2.5-flash-preview-04-17"
+GEMINI_MODEL = "gemini-2.5-flash-preview-05-20"
 
 # State keys for session state
 STATE_USER_PROMPT = "user_prompt"
