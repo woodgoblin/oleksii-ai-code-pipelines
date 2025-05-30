@@ -6,13 +6,12 @@ import asyncio
 from collections import deque
 from typing import Optional, Callable, Any, Tuple
 
-from cursor_prompt_preprocessor.config import RATE_LIMIT_MAX_CALLS, RATE_LIMIT_WINDOW
 from common.logging_setup import logger
 
 class RateLimiter:
     """Async-safe rate limiter using sliding window approach for MCP agents."""
     
-    def __init__(self, max_calls=RATE_LIMIT_MAX_CALLS, window_seconds=RATE_LIMIT_WINDOW, logger_instance=None):
+    def __init__(self, max_calls=10, window_seconds=60, logger_instance=None):
         self.max_calls = max_calls
         self.window_seconds = window_seconds
         self.call_history = deque()

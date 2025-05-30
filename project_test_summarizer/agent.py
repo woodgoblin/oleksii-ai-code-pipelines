@@ -33,11 +33,11 @@ logger = setup_logging("project_test_summarizer", redirect_stdout=False)
 rate_limiter = RateLimiter(
     max_calls=RATE_LIMIT_MAX_CALLS, 
     window_seconds=RATE_LIMIT_WINDOW, 
-    logger=logger
+    logger_instance=logger
 )
 pre_model_rate_limit, handle_rate_limit_and_server_errors = create_rate_limit_callbacks(
     rate_limiter_instance=rate_limiter,
-    logger=logger
+    logger_instance=logger
 )
 
 # Universal constraint preamble for all agents
