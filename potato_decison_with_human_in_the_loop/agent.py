@@ -12,7 +12,7 @@ from google.adk.tools import FunctionTool, ToolContext
 from google.adk.sessions import InMemorySessionService
 
 # Import from common modules 
-from common.rate_limiting import pre_model_rate_limit, handle_rate_limit
+from common.rate_limiting import create_rate_limit_callbacks, RateLimiter
 from common.logging_setup import logger
 
 # Session setup
@@ -40,6 +40,13 @@ def set_session(session):
     global _session
     _session = session
 
+# Create rate limiter and callbacks
+rate_limiter = RateLimiter(logger_instance=logger)
+pre_model_rate_limit, handle_rate_limit_and_server_errors = create_rate_limit_callbacks(
+    rate_limiter_instance=rate_limiter,
+    logger_instance=logger
+)
+
 # Factory function for creating rate-limited agents
 def create_rate_limited_agent(name, model, instruction, tools=None, output_key=None, sub_agents=None):
     """Factory function to create LlmAgents with rate limiting."""
@@ -51,7 +58,7 @@ def create_rate_limited_agent(name, model, instruction, tools=None, output_key=N
         output_key=output_key,
         sub_agents=sub_agents or [],
         before_model_callback=pre_model_rate_limit,
-        after_model_callback=handle_rate_limit
+        after_model_callback=handle_rate_limit_and_server_errors
     )
 
 # --- Tools ---

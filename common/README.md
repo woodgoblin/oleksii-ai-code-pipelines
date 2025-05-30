@@ -4,43 +4,23 @@ This directory contains shared utilities used across multiple agents in the codi
 
 ## Rate Limiting (`rate_limiting.py`)
 
+Simple rate limiting for Google ADK agents with sliding window approach.
+
 ### Features
-
-The rate limiting module provides comprehensive error handling and retry logic for Google ADK agents:
-
-#### **429 Rate Limit Handling**
-- Detects Google GenAI API `429 RESOURCE_EXHAUSTED` errors
-- Parses `retryDelay` from API error responses (supports multiple formats)
-- Implements exponential backoff with jitter for successive retries
-- Respects API-specified retry delays
-
-#### **5xx Server Error Handling** 
-- Handles 500, 502, 503, 504 server errors
-- Implements immediate retry with exponential backoff
-- Different backoff strategies for different error types
-
-#### **Intelligent Retry Logic**
-- **Exponential Backoff**: `delay = base_delay * (2 ** attempt)`
-- **Jitter**: ±50% randomization to avoid thundering herd
-- **Max Retries**: Configurable (default: 3 attempts)
-- **Max Delay**: Caps to prevent infinite waits
-
-#### **Error Parsing**
-- Comprehensive JSON parsing from error responses
-- Multiple fallback patterns for extracting `retryDelay`
-- Handles both `google.genai.errors.ClientError` and generic exceptions
+- **Sliding Window Rate Limiting**: Configurable calls per time window
+- **429 Error Handling**: Extracts and respects API-specified retry delays
+- **Async-Safe**: Thread-safe with proper locking
 
 ### Usage
 
 ```python
 from common.rate_limiting import create_rate_limit_callbacks, RateLimiter
 
-# Create custom rate limiter
-rate_limiter = RateLimiter(max_calls=10, window_seconds=60, logger=logger)
+# Create rate limiter and callbacks
+rate_limiter = RateLimiter(max_calls=10, window_seconds=60, logger_instance=logger)
 pre_callback, post_callback = create_rate_limit_callbacks(
     rate_limiter_instance=rate_limiter,
-    logger=logger,
-    max_retries=3
+    logger_instance=logger
 )
 
 # Use in LlmAgent
@@ -53,70 +33,64 @@ agent = LlmAgent(
 )
 ```
 
-### Error Types Handled
+## Retry Runner (`retry_runner.py`)
 
-| Error Type | HTTP Codes | Strategy |
-|------------|------------|----------|
-| `genai_rate_limit` | 429 + RESOURCE_EXHAUSTED | API delay + exponential backoff |
-| `server_error` | 500, 502, 503, 504 | Exponential backoff (2s base) |
-| `rate_limit` | 429 (general) | Exponential backoff (5s base) |
+Simple retry logic for LLM API errors - handles 429 with API delays and all other errors with configurable exponential backoff.
 
-### Backoff Calculations
+### Features
+- **429 Handling**: Uses API-specified retry delays from error messages
+- **Simple Backoff**: Exponential backoff for all other errors
+- **Enhanced Runner**: Wraps ADK Runner for transparent retry handling
 
-- **GenAI Rate Limits**: `max(api_delay, exponential_backoff(1s base, 30s max))`
-- **Server Errors**: `exponential_backoff(2s base, 60s max)`
-- **Other Rate Limits**: `exponential_backoff(5s base, 120s max)`
+### Usage
 
-## Enhanced Error Handling
-
-### Runner-Level Error Handling
-
-The rate limiting module now provides `create_enhanced_runner()` which wraps the ADK Runner to catch LLM exceptions that occur **before** the framework's callbacks are invoked.
-
-**Why this is needed:** In ADK 1.0.0, `before_model_callback` and `after_model_callback` are only called around **successful** LLM interactions. When 429 or 500 errors occur during the LLM call itself (in the Google GenAI SDK layers), these exceptions bubble up **before** the ADK framework gets control, so callbacks are never invoked.
-
-**Solution:** The enhanced runner wraps the `Runner.run_async()` method to catch these exceptions at a higher level in the call stack.
+#### Enhanced Runner (Recommended)
 
 ```python
-from common.rate_limiting import create_enhanced_runner
-from project_test_summarizer.agent import root_agent
-from project_test_summarizer.session import session_manager
+from common.retry_runner import create_enhanced_runner
 
-# Instead of using Runner directly:
-# runner = Runner(agent=root_agent, app_name=APP_NAME, session_service=session_service)
-
-# Use the enhanced runner:
 runner = create_enhanced_runner(
     agent=root_agent,
     app_name=APP_NAME,
     session_service=session_service,
     max_retries=3,
-    logger=logger
+    base_delay=2.0,  # Base delay for exponential backoff
+    logger_instance=logger
 )
 
-# Use normally - error handling is transparent
+# Use normally - retry handling is transparent
 async for event in runner.run_async(user_id, session_id, message):
     # Handle events normally
     pass
 ```
 
-**Features:**
-- Catches `google.genai.errors.ClientError` (429 RESOURCE_EXHAUSTED)
-- Catches `google.genai.errors.ServerError` (500 INTERNAL, 502, 503, 504)
-- Implements exponential backoff with jitter
-- Respects API-specified retry delays from Google GenAI
-- Transparent to existing code - just replace Runner creation
-- Per-request retry tracking to avoid infinite loops
+#### Standalone Retry Function
+
+```python
+from common.retry_runner import retry_with_simple_backoff
+
+async def my_llm_function():
+    # Your LLM API call here
+    pass
+
+result = await retry_with_simple_backoff(
+    my_llm_function,
+    max_retries=3,
+    base_delay=2.0,
+    logger_instance=logger
+)
+```
+
+### Error Handling
+
+| Error Type | Strategy |
+|------------|----------|
+| 429 Rate Limit | Uses API-specified delay from error message |
+| All Other Errors | Exponential backoff: `base_delay * (2 ** attempt)` |
 
 ## Logging Setup (`logging_setup.py`)
 
 Provides configurable logging with file rotation and stdout redirection for consistent logging across all agents.
-
-### Features
-- Configurable log file names and rotation
-- Thread-safe stdout/stderr redirection
-- Multiple log levels and formatters
-- Integration with rate limiting for debug logging
 
 ## Tools (`tools.py`)
 

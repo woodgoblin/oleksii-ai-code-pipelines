@@ -17,12 +17,19 @@ from cursor_prompt_preprocessor.config import (
     STATE_TARGET_DIRECTORY, NO_QUESTIONS
 )
 from common.logging_setup import logger
-from common.rate_limiting import pre_model_rate_limit, handle_rate_limit
+from common.rate_limiting import create_rate_limit_callbacks, RateLimiter
 from common.tools import (
     scan_project_structure, get_dependencies, apply_gitignore_filter,
     search_code_with_prompt, search_tests_with_prompt, determine_relevance_from_prompt,
     set_session_state, set_target_directory, read_file_content, list_directory_contents,
     ClarifierGenerator
+)
+
+# Create rate limiter and callbacks
+rate_limiter = RateLimiter(logger_instance=logger)
+pre_model_rate_limit, handle_rate_limit_and_server_errors = create_rate_limit_callbacks(
+    rate_limiter_instance=rate_limiter,
+    logger_instance=logger
 )
 
 # Universal negative constraint preamble for all LLM agent instructions
@@ -56,7 +63,7 @@ def create_rate_limited_agent(name, model, instruction, tools=None, output_key=N
         output_key=output_key,
         sub_agents=sub_agents or [],
         before_model_callback=pre_model_rate_limit,
-        after_model_callback=handle_rate_limit
+        after_model_callback=handle_rate_limit_and_server_errors
     )
 
 # --- Tool Wrappers ---

@@ -37,8 +37,7 @@ rate_limiter = RateLimiter(
 )
 pre_model_rate_limit, handle_rate_limit_and_server_errors = create_rate_limit_callbacks(
     rate_limiter_instance=rate_limiter,
-    logger=logger,
-    max_retries=3  # Allow up to 3 retries for 429/500 errors
+    logger=logger
 )
 
 # Universal constraint preamble for all agents
