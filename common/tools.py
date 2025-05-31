@@ -10,7 +10,7 @@ from zoneinfo import ZoneInfo
 import gitignore_parser
 from google.adk.tools import ToolContext
 
-from cursor_prompt_preprocessor.config import STATE_TARGET_DIRECTORY, STATE_QUESTIONS
+from common.constants import STATE_TARGET_DIRECTORY, STATE_QUESTIONS
 from common.logging_setup import logger
 
 # --- Human Input Tools ---

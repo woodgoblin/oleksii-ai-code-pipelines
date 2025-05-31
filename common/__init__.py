@@ -1,1 +1,3 @@
-# This file makes this a Python package. 
+"""Common utilities and shared components."""
+
+# This file makes common a Python package. 
