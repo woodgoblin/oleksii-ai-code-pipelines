@@ -297,18 +297,18 @@ class TestRateLimiterEdgeCases:
         """Should handle negative delay gracefully by not going back in time."""
         # Arrange
         limiter = RateLimiter(max_calls=60, window_seconds=60)
-        
-        # Mock time to avoid timing race conditions  
-        with patch('time.time') as mock_time:
+
+        # Mock time to avoid timing race conditions
+        with patch("time.time") as mock_time:
             current_time = 1234567890.0
             mock_time.return_value = current_time
-            
+
             # Store initial next_allowed_call_time (should be 0)
             initial_time = limiter._next_allowed_call_time
-            
+
             # Act - Set a negative delay
             limiter.update_next_allowed_call_time(-5.0)
-            
+
             # Assert - Should use max() logic: max(initial_time, current_time + delay)
             # max(0, 1234567890.0 + (-5.0)) = max(0, 1234567885.0) = 1234567885.0
             expected_time = max(initial_time, current_time + (-5.0))

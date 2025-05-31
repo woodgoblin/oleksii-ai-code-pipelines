@@ -262,7 +262,7 @@ class TestMCPServerImportHandling:
         """Should calculate project root path correctly."""
         # Act
         import common.mcp_server
-        
+
         # Assert - Project root should be accessible in sys.path
         # Use current working directory for CI compatibility
         current_project_root = os.getcwd()
