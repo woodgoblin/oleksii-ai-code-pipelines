@@ -15,4 +15,4 @@ STATE_TARGET_DIRECTORY = "target_directory"
 STATE_NEEDS_ANSWERS = "needs_answers"
 
 # Special constants
-NO_QUESTIONS = "no questions ABSOLUTELY"
+NO_QUESTIONS = "no questions ABSOLUTELY" 

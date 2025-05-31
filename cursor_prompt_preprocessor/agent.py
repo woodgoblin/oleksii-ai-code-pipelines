@@ -4,61 +4,43 @@ This module contains all the LLM agents used in the Cursor Prompt Preprocessor,
 defining their names, prompts, and tools.
 """
 
-from google.adk.agents import LlmAgent, ParallelAgent, SequentialAgent
+from google.adk.agents import LlmAgent, SequentialAgent, ParallelAgent
 from google.adk.agents.loop_agent import LoopAgent
 from google.adk.tools import FunctionTool
 
-from common.logging_setup import logger
-from common.rate_limiting import RateLimiter, create_rate_limit_callbacks
-from common.tools import (
-    ClarifierGenerator,
-    apply_gitignore_filter,
-    determine_relevance_from_prompt,
-    get_dependencies,
-    list_directory_contents,
-    read_file_content,
-    scan_project_structure,
-    search_code_with_prompt,
-    search_tests_with_prompt,
-    set_session_state,
-    set_target_directory,
-)
-
 # Import from our modules
 from cursor_prompt_preprocessor.config import (
-    GEMINI_MODEL,
-    NO_QUESTIONS,
-    STATE_ANSWERS,
-    STATE_DEPENDENCIES,
-    STATE_FILTERED_STRUCTURE,
-    STATE_FINAL_CONTEXT,
-    STATE_PROJECT_STRUCTURE,
-    STATE_QUESTIONS,
-    STATE_RELEVANCE_SCORES,
-    STATE_RELEVANT_CODE,
-    STATE_RELEVANT_TESTS,
-    STATE_TARGET_DIRECTORY,
-    STATE_USER_PROMPT,
+    GEMINI_MODEL, 
+    STATE_USER_PROMPT, STATE_PROJECT_STRUCTURE, STATE_DEPENDENCIES,
+    STATE_FILTERED_STRUCTURE, STATE_RELEVANT_CODE, STATE_RELEVANT_TESTS,
+    STATE_RELEVANCE_SCORES, STATE_QUESTIONS, STATE_ANSWERS, STATE_FINAL_CONTEXT,
+    STATE_TARGET_DIRECTORY, NO_QUESTIONS
+)
+from common.logging_setup import logger
+from common.rate_limiting import create_rate_limit_callbacks, RateLimiter
+from common.tools import (
+    scan_project_structure, get_dependencies, apply_gitignore_filter,
+    search_code_with_prompt, search_tests_with_prompt, determine_relevance_from_prompt,
+    set_session_state, set_target_directory, read_file_content, list_directory_contents,
+    ClarifierGenerator
 )
 
 # Create rate limiter and callbacks
 rate_limiter = RateLimiter(logger_instance=logger)
 pre_model_rate_limit, handle_rate_limit_and_server_errors = create_rate_limit_callbacks(
-    rate_limiter_instance=rate_limiter, logger_instance=logger
+    rate_limiter_instance=rate_limiter,
+    logger_instance=logger
 )
 
 # Universal negative constraint preamble for all LLM agent instructions
 AGENT_INSTRUCTION_PREAMBLE = """IMPORTANT: You are an analytical assistant. Your capabilities are strictly limited to understanding, analyzing, and searching existing code and project structures using ONLY the tools explicitly provided to you. You CANNOT create, write, modify, or delete files or directories. You CANNOT execute code or terminal commands unless a specific tool for that exact purpose is provided. If you believe a file needs to be created or modified, or another action outside your toolset is required, state this as a suggestion or finding in your textual response, but DO NOT attempt to perform the action or call a non-existent tool for it. Adhere strictly to your designated role and available tools."""
 
-
-def create_rate_limited_agent(
-    name, model, instruction, tools=None, output_key=None, sub_agents=None
-):
+def create_rate_limited_agent(name, model, instruction, tools=None, output_key=None, sub_agents=None):
     """Create an LlmAgent with rate limiting and universal constraints applied.
-
+    
     Factory function to ensure all agents have consistent rate limiting and adhere
     to fundamental operational constraints.
-
+    
     Args:
         name: Agent name
         model: Model name
@@ -66,24 +48,23 @@ def create_rate_limited_agent(
         tools: List of tools
         output_key: Output state key
         sub_agents: List of sub-agents
-
+    
     Returns:
         LlmAgent with rate limiting and universal constraints.
     """
-
+    
     full_instruction = AGENT_INSTRUCTION_PREAMBLE + "\n\n" + instruction
 
     return LlmAgent(
         name=name,
         model=model,
-        instruction=full_instruction,  # Use the prepended instruction
+        instruction=full_instruction, # Use the prepended instruction
         tools=tools or [],
         output_key=output_key,
         sub_agents=sub_agents or [],
         before_model_callback=pre_model_rate_limit,
-        after_model_callback=handle_rate_limit_and_server_errors,
+        after_model_callback=handle_rate_limit_and_server_errors
     )
-
 
 # --- Tool Wrappers ---
 
@@ -99,12 +80,9 @@ determine_relevance_from_prompt_tool = FunctionTool(func=determine_relevance_fro
 set_state_tool = FunctionTool(func=set_session_state)
 set_target_directory_tool = FunctionTool(func=set_target_directory)
 
-
 # Wrapper for ClarifierGenerator to ensure correct tool name registration
 def clarifier_generator_callable():
     return ClarifierGenerator().__call__()
-
-
 clarifier_generator_callable.__name__ = "clarify_questions_tool"
 
 clarify_questions_tool = FunctionTool(func=clarifier_generator_callable)
@@ -133,7 +111,7 @@ project_structure_agent = create_rate_limited_agent(
     help with understanding the codebase.
     """,
     tools=[scan_project_structure_tool],
-    output_key=STATE_PROJECT_STRUCTURE,
+    output_key=STATE_PROJECT_STRUCTURE
 )
 
 # Dependency Analysis Agent
@@ -156,7 +134,7 @@ dependency_analysis_agent = create_rate_limited_agent(
     the technological stack of the project.
     """,
     tools=[list_directory_contents_tool, read_file_content_tool],
-    output_key=STATE_DEPENDENCIES,
+    output_key=STATE_DEPENDENCIES
 )
 
 # Gitignore Filter Agent
@@ -174,7 +152,7 @@ gitignore_filter_agent = create_rate_limited_agent(
     would typically be relevant for understanding the codebase.
     """,
     tools=[apply_gitignore_filter_tool, read_file_content_tool],
-    output_key=STATE_FILTERED_STRUCTURE,
+    output_key=STATE_FILTERED_STRUCTURE
 )
 
 # Code Search Agent
@@ -196,8 +174,12 @@ code_search_agent = create_rate_limited_agent(
 
     IMPORTANT: If needed, utilize the read_file_content() tool and list_directory_contents() tool to get more context about the codebase.
     """,
-    tools=[search_code_with_prompt_tool, read_file_content_tool, list_directory_contents_tool],
-    output_key=STATE_RELEVANT_CODE,
+    tools=[
+        search_code_with_prompt_tool,
+        read_file_content_tool,
+        list_directory_contents_tool
+    ],
+    output_key=STATE_RELEVANT_CODE
 )
 
 # Test Search Agent
@@ -220,8 +202,12 @@ test_search_agent = create_rate_limited_agent(
     
     IMPORTANT: If needed, utilize the read_file_content() tool and list_directory_contents() tool to get more context about the codebase.
     """,
-    tools=[search_tests_with_prompt_tool, read_file_content_tool, list_directory_contents_tool],
-    output_key=STATE_RELEVANT_TESTS,
+    tools=[
+        search_tests_with_prompt_tool,
+        read_file_content_tool,
+        list_directory_contents_tool
+    ],
+    output_key=STATE_RELEVANT_TESTS
 )
 
 # Relevance Determination Agent
@@ -243,12 +229,9 @@ relevance_determination_agent = create_rate_limited_agent(
     
     Format your response as a ranked list with explanations for why each top file is relevant.
     """,
-    tools=[
-        determine_relevance_from_prompt_tool,
-        read_file_content_tool,
-        list_directory_contents_tool,
-    ],
-    output_key=STATE_RELEVANCE_SCORES,
+
+    tools=[determine_relevance_from_prompt_tool, read_file_content_tool, list_directory_contents_tool],
+    output_key=STATE_RELEVANCE_SCORES
 )
 
 # Question Asking Agent
@@ -277,7 +260,7 @@ question_asking_agent = create_rate_limited_agent(
     4. If the prompt is completely clear and has sufficient information, respond EXACTLY with the string "{NO_QUESTIONS}"
     """,
     tools=[read_file_content_tool],
-    output_key=STATE_QUESTIONS,
+    output_key=STATE_QUESTIONS
 )
 
 # User Answer Collection Agent
@@ -301,8 +284,11 @@ user_answer_collection_agent = create_rate_limited_agent(
 
     Strictly adhere to this logic. Do not deviate. Only call `clarify_questions_tool` and then `set_state` if questions exist. Otherwise, output the exact exit string and make NO function calls.
     """,
-    tools=[clarify_questions_tool, set_state_tool],
-    output_key=STATE_ANSWERS,
+    tools=[
+        clarify_questions_tool, 
+        set_state_tool
+    ],
+    output_key=STATE_ANSWERS
 )
 
 # Context Formation Agent
@@ -328,20 +314,25 @@ context_formation_agent = create_rate_limited_agent(
     
     IMPORTANT: The user's prompt is the initial prompt, and the summarization is the final prompt, given the clarifying questions and their answers.
     """,
-    output_key=STATE_FINAL_CONTEXT,
+    output_key=STATE_FINAL_CONTEXT
 )
 
 # --- Agent Pipeline Construction ---
 
 # Parallel agent for search operations
 parallel_search_agent = ParallelAgent(
-    name="ParallelSearchAgent", sub_agents=[code_search_agent, test_search_agent]
+    name="ParallelSearchAgent",
+    sub_agents=[code_search_agent, test_search_agent]
 )
 
 # Agent for project structure and dependencies analysis
 structure_and_dependencies_agent = SequentialAgent(
     name="StructureAndDependencies",
-    sub_agents=[project_structure_agent, dependency_analysis_agent, gitignore_filter_agent],
+    sub_agents=[
+        project_structure_agent, 
+        dependency_analysis_agent,
+        gitignore_filter_agent
+    ]
 )
 
 # Loop agent for clarification process
@@ -351,9 +342,9 @@ clarification_and_decision_loop = LoopAgent(
         parallel_search_agent,
         relevance_determination_agent,
         question_asking_agent,
-        user_answer_collection_agent,
-    ],
-    max_iterations=3,
+        user_answer_collection_agent
+    ], 
+    max_iterations=3
 )
 
 # Sequential pipeline for context formation
@@ -362,8 +353,8 @@ context_former = SequentialAgent(
     sub_agents=[
         structure_and_dependencies_agent,
         clarification_and_decision_loop,
-        context_formation_agent,
-    ],
+        context_formation_agent
+    ]
 )
 
 # The root agent (entry point)
@@ -389,5 +380,5 @@ root_agent = create_rate_limited_agent(
     Keep your responses friendly, professional, and focused on helping the user succeed with their coding task.
     """,
     tools=[set_state_tool, set_target_directory_tool],
-    sub_agents=[context_former],
+    sub_agents=[context_former]
 )

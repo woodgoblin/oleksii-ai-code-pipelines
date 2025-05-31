@@ -4,41 +4,26 @@ This module contains all the LLM agents used in the Project Test Summarizer,
 defining their names, prompts, and tools for test analysis.
 """
 
-from google.adk.agents import LlmAgent, ParallelAgent, SequentialAgent
+from google.adk.agents import LlmAgent, SequentialAgent, ParallelAgent
 from google.adk.agents.loop_agent import LoopAgent
 from google.adk.tools import FunctionTool
 
-from common.logging_setup import setup_logging
-from common.rate_limiting import RateLimiter, create_rate_limit_callbacks
-from common.tools import (
-    get_session_state,
-    list_directory_contents,
-    read_file_content,
-    search_codebase,
-    set_session_state,
-)
-
 # Import from our modules
 from project_test_summarizer.config import (
-    GEMINI_MODEL,
-    NO_ISSUES_FOUND,
-    RATE_LIMIT_MAX_CALLS,
-    RATE_LIMIT_WINDOW,
-    STATE_AI_REPORT,
-    STATE_EXTRACTED_TESTS,
-    STATE_HUMAN_REPORT,
-    STATE_PROJECT_SUMMARY,
-    STATE_TARGET_PROJECT,
-    STATE_TEST_ANALYSIS,
-    STATE_TEST_REPORTS,
+    GEMINI_MODEL, 
+    STATE_TARGET_PROJECT, STATE_TEST_REPORTS, STATE_EXTRACTED_TESTS,
+    STATE_TEST_ANALYSIS, STATE_HUMAN_REPORT, STATE_AI_REPORT, STATE_PROJECT_SUMMARY,
+    NO_ISSUES_FOUND, RATE_LIMIT_MAX_CALLS, RATE_LIMIT_WINDOW
+)
+from common.logging_setup import setup_logging
+from common.rate_limiting import create_rate_limit_callbacks, RateLimiter
+from common.tools import (
+    read_file_content, list_directory_contents, search_codebase,
+    set_session_state, get_session_state
 )
 from project_test_summarizer.tools import (
-    analyze_multiple_test_reports,
-    analyze_test_report_content,
-    discover_test_files,
-    discover_test_reports,
-    save_analysis_report,
-    search_test_by_name,
+    discover_test_reports, analyze_test_report_content, analyze_multiple_test_reports, discover_test_files,
+    search_test_by_name, save_analysis_report
 )
 
 # Set up logging and rate limiting for this module
@@ -46,21 +31,21 @@ logger = setup_logging("project_test_summarizer", redirect_stdout=False)
 
 # Create rate limiter with our configuration and enhanced retry logic
 rate_limiter = RateLimiter(
-    max_calls=RATE_LIMIT_MAX_CALLS, window_seconds=RATE_LIMIT_WINDOW, logger_instance=logger
+    max_calls=RATE_LIMIT_MAX_CALLS, 
+    window_seconds=RATE_LIMIT_WINDOW, 
+    logger_instance=logger
 )
 pre_model_rate_limit, handle_rate_limit_and_server_errors = create_rate_limit_callbacks(
-    rate_limiter_instance=rate_limiter, logger_instance=logger
+    rate_limiter_instance=rate_limiter,
+    logger_instance=logger
 )
 
 # Universal constraint preamble for all agents
 AGENT_INSTRUCTION_PREAMBLE = """IMPORTANT: You are a test analysis specialist. Your capabilities are strictly limited to analyzing, understanding, and discovering existing test files and test reports using ONLY the tools explicitly provided to you. You CANNOT create, write, modify, or delete files or directories. You CANNOT execute code or terminal commands. You CANNOT run tests. Your role is purely analytical - to examine existing test artifacts and provide insights about test quality, consistency, and naming. If you believe files need to be created or modified, state this as a suggestion in your textual response, but DO NOT attempt to perform the action."""
 
-
-def create_rate_limited_agent(
-    name, model, instruction, tools=None, output_key=None, sub_agents=None
-):
+def create_rate_limited_agent(name, model, instruction, tools=None, output_key=None, sub_agents=None):
     """Create an LlmAgent with rate limiting and universal constraints applied."""
-
+    
     full_instruction = AGENT_INSTRUCTION_PREAMBLE + "\n\n" + instruction
 
     # Create the base agent with enhanced callbacks
@@ -72,9 +57,8 @@ def create_rate_limited_agent(
         output_key=output_key,
         sub_agents=sub_agents or [],
         before_model_callback=pre_model_rate_limit,
-        after_model_callback=handle_rate_limit_and_server_errors,
+        after_model_callback=handle_rate_limit_and_server_errors
     )
-
 
 # --- Tool Wrappers ---
 
@@ -129,9 +113,9 @@ test_report_discovery_agent = create_rate_limited_agent(
         analyze_test_report_content_tool,
         analyze_multiple_test_reports_tool,
         list_directory_contents_tool,
-        set_session_state_tool,
+        set_session_state_tool
     ],
-    output_key=STATE_TEST_REPORTS,
+    output_key=STATE_TEST_REPORTS
 )
 
 # Test Name Extraction Agent
@@ -162,8 +146,10 @@ test_extraction_agent = create_rate_limited_agent(
     - Confidence level in the extraction
     - Notes about parameterization or variations
     """,
-    tools=[set_session_state_tool],
-    output_key=STATE_EXTRACTED_TESTS,
+    tools=[
+        set_session_state_tool
+    ],
+    output_key=STATE_EXTRACTED_TESTS
 )
 
 # Individual Test Analysis Agent
@@ -212,9 +198,9 @@ test_analysis_agent = create_rate_limited_agent(
         read_file_content_tool,
         search_codebase_tool,
         discover_test_files_tool,
-        set_session_state_tool,
+        set_session_state_tool
     ],
-    output_key=STATE_TEST_ANALYSIS,
+    output_key=STATE_TEST_ANALYSIS
 )
 
 # Human-Friendly Report Generator
@@ -253,13 +239,15 @@ human_report_agent = create_rate_limited_agent(
     Format as a JSON structure that is human-readable but also structured.
     Store in session state key '{STATE_HUMAN_REPORT}'.
     """,
-    tools=[set_session_state_tool],
-    output_key=STATE_HUMAN_REPORT,
+    tools=[
+        set_session_state_tool
+    ],
+    output_key=STATE_HUMAN_REPORT
 )
 
 # AI-Friendly Report Generator
 ai_report_agent = create_rate_limited_agent(
-    name="AIReportAgent",
+    name="AIReportAgent", 
     model=GEMINI_MODEL,
     instruction=f"""
     You are an AI-Friendly Report Generator.
@@ -298,8 +286,10 @@ ai_report_agent = create_rate_limited_agent(
     Format as a JSON structure optimized for programmatic consumption.
     Store in session state key '{STATE_AI_REPORT}'.
     """,
-    tools=[set_session_state_tool],
-    output_key=STATE_AI_REPORT,
+    tools=[
+        set_session_state_tool
+    ],
+    output_key=STATE_AI_REPORT
 )
 
 # Project Test Summarizer Agent
@@ -330,8 +320,10 @@ project_summary_agent = create_rate_limited_agent(
     
     Store all three summaries in session state key '{STATE_PROJECT_SUMMARY}'.
     """,
-    tools=[set_session_state_tool],
-    output_key=STATE_PROJECT_SUMMARY,
+    tools=[
+        set_session_state_tool
+    ],
+    output_key=STATE_PROJECT_SUMMARY
 )
 
 # Report Compilation and Export Agent
@@ -359,7 +351,9 @@ report_export_agent = create_rate_limited_agent(
     
     The exported report should be a complete record of the entire test analysis process.
     """,
-    tools=[save_analysis_report_tool],
+    tools=[
+        save_analysis_report_tool
+    ]
 )
 
 # --- Agent Pipeline Construction ---
@@ -367,12 +361,20 @@ report_export_agent = create_rate_limited_agent(
 # Sequential analysis pipeline
 test_discovery_and_extraction = SequentialAgent(
     name="TestDiscoveryAndExtraction",
-    sub_agents=[test_report_discovery_agent, test_extraction_agent],
+    sub_agents=[
+        test_report_discovery_agent,
+        test_extraction_agent
+    ]
 )
 
 # Parallel report generation
 report_generation = ParallelAgent(
-    name="ReportGeneration", sub_agents=[human_report_agent, ai_report_agent, project_summary_agent]
+    name="ReportGeneration", 
+    sub_agents=[
+        human_report_agent,
+        ai_report_agent,
+        project_summary_agent
+    ]
 )
 
 # Complete analysis pipeline
@@ -382,8 +384,8 @@ analysis_pipeline = SequentialAgent(
         test_discovery_and_extraction,
         test_analysis_agent,
         report_generation,
-        report_export_agent,
-    ],
+        report_export_agent
+    ]
 )
 
 # The root agent (entry point)
@@ -416,6 +418,9 @@ root_agent = create_rate_limited_agent(
     
     Keep your responses professional and focused on helping improve test quality.
     """,
-    tools=[set_session_state_tool, list_directory_contents_tool],
-    sub_agents=[analysis_pipeline],
-)
+    tools=[
+        set_session_state_tool,
+        list_directory_contents_tool
+    ],
+    sub_agents=[analysis_pipeline]
+) 

@@ -119,37 +119,6 @@ from cursor_prompt_preprocessor.agent import root_agent
 # Use the agent programmatically
 ```
 
-## CI/CD Pipeline
-
-The project includes a comprehensive GitHub Actions workflow that runs on pull requests and pushes to main/develop branches.
-
-### Workflow Features
-
-- **Multi-Python Version Testing**: Tests against Python 3.9, 3.10, 3.11, and 3.12
-- **Code Quality Checks**: 
-  - Black code formatting validation
-  - isort import sorting validation
-  - mypy type checking (non-blocking)
-- **Test Execution**: Full test suite execution with pytest
-- **Coverage Reporting**: Code coverage analysis with detailed reports
-- **Dependency Caching**: pip dependency caching for faster builds
-- **Artifact Collection**: Test results and coverage reports saved as artifacts
-
-### Running Tests Locally
-
-```bash
-# Run all tests
-pytest tests/ -v
-
-# Run tests with coverage
-pytest tests/ --cov=. --cov-report=html
-
-# Run code quality checks
-black --check .
-isort --check-only .
-mypy .
-```
-
 ## Dependencies
 
 - **google-adk**: Multi-agent framework
