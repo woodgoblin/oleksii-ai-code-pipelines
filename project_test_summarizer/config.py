@@ -30,36 +30,36 @@ LOG_BACKUP_COUNT = 5
 
 # Test framework patterns for discovery
 TEST_REPORT_PATTERNS = [
-    "**/test-results/**/*.xml",    # JUnit XML
-    "**/test-results/**/*.json",   # JSON reports
-    "**/test-results/**/*.html",   # HTML reports
+    "**/test-results/**/*.xml",  # JUnit XML
+    "**/test-results/**/*.json",  # JSON reports
+    "**/test-results/**/*.html",  # HTML reports
     "**/target/surefire-reports/*.xml",  # Maven Surefire
     "**/target/failsafe-reports/*.xml",  # Maven Failsafe
-    "**/build/test-results/**/*.xml",    # Gradle
+    "**/build/test-results/**/*.xml",  # Gradle
     "**/build/reports/tests/**/*.html",  # Gradle HTML
-    "**/pytest-report.xml",        # pytest XML
-    "**/pytest-report.html",       # pytest HTML
-    "**/coverage.xml",             # Coverage reports
-    "**/junit.xml",               # Generic JUnit
-    "**/test_results.xml",        # Generic test results
-    "**/test-report.json",        # Generic JSON
-    "**/.pytest_cache/**/*",      # pytest cache
+    "**/pytest-report.xml",  # pytest XML
+    "**/pytest-report.html",  # pytest HTML
+    "**/coverage.xml",  # Coverage reports
+    "**/junit.xml",  # Generic JUnit
+    "**/test_results.xml",  # Generic test results
+    "**/test-report.json",  # Generic JSON
+    "**/.pytest_cache/**/*",  # pytest cache
 ]
 
 # Common test file patterns for code discovery
 TEST_FILE_PATTERNS = [
-    "**/test_*.py",               # Python pytest pattern
-    "**/*_test.py",               # Python pytest pattern
-    "**/test*.py",                # Python unittest pattern
-    "**/*Test.java",              # Java JUnit pattern
-    "**/*Tests.java",             # Java JUnit pattern
-    "**/Test*.java",              # Java JUnit pattern
-    "**/*.test.js",               # JavaScript Jest pattern
-    "**/*.spec.js",               # JavaScript Jasmine/Mocha
-    "**/*.test.ts",               # TypeScript Jest pattern
-    "**/*.spec.ts",               # TypeScript Jasmine/Mocha
-    "**/test/**/*.py",            # Python test directory
-    "**/tests/**/*.py",           # Python tests directory
-    "**/src/test/**/*.java",      # Java Maven structure
-    "**/src/test/**/*.kt",        # Kotlin test structure
-] 
+    "**/test_*.py",  # Python pytest pattern
+    "**/*_test.py",  # Python pytest pattern
+    "**/test*.py",  # Python unittest pattern
+    "**/*Test.java",  # Java JUnit pattern
+    "**/*Tests.java",  # Java JUnit pattern
+    "**/Test*.java",  # Java JUnit pattern
+    "**/*.test.js",  # JavaScript Jest pattern
+    "**/*.spec.js",  # JavaScript Jasmine/Mocha
+    "**/*.test.ts",  # TypeScript Jest pattern
+    "**/*.spec.ts",  # TypeScript Jasmine/Mocha
+    "**/test/**/*.py",  # Python test directory
+    "**/tests/**/*.py",  # Python tests directory
+    "**/src/test/**/*.java",  # Java Maven structure
+    "**/src/test/**/*.kt",  # Kotlin test structure
+]

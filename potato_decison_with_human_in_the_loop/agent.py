@@ -8,12 +8,13 @@ import re
 import time
 
 from google.adk.agents import LlmAgent, LoopAgent, SequentialAgent
-from google.adk.tools import FunctionTool, ToolContext
 from google.adk.sessions import InMemorySessionService
+from google.adk.tools import FunctionTool, ToolContext
 
-# Import from common modules 
-from common.rate_limiting import create_rate_limit_callbacks, RateLimiter
 from common.logging_setup import logger
+
+# Import from common modules
+from common.rate_limiting import RateLimiter, create_rate_limit_callbacks
 
 # Session setup
 APP_NAME = "test_poc_agent"
@@ -34,21 +35,25 @@ STATE_FINAL_SUMMARY = "final_summary"
 # Use a modern Gemini model
 GEMINI_MODEL = "gemini-2.5-flash-preview-04-17"
 
+
 # Global session manager for the demo
 def set_session(session):
     """Set the global session for this agent module."""
     global _session
     _session = session
 
+
 # Create rate limiter and callbacks
 rate_limiter = RateLimiter(logger_instance=logger)
 pre_model_rate_limit, handle_rate_limit_and_server_errors = create_rate_limit_callbacks(
-    rate_limiter_instance=rate_limiter,
-    logger_instance=logger
+    rate_limiter_instance=rate_limiter, logger_instance=logger
 )
 
+
 # Factory function for creating rate-limited agents
-def create_rate_limited_agent(name, model, instruction, tools=None, output_key=None, sub_agents=None):
+def create_rate_limited_agent(
+    name, model, instruction, tools=None, output_key=None, sub_agents=None
+):
     """Factory function to create LlmAgents with rate limiting."""
     return LlmAgent(
         name=name,
@@ -58,10 +63,12 @@ def create_rate_limited_agent(name, model, instruction, tools=None, output_key=N
         output_key=output_key,
         sub_agents=sub_agents or [],
         before_model_callback=pre_model_rate_limit,
-        after_model_callback=handle_rate_limit_and_server_errors
+        after_model_callback=handle_rate_limit_and_server_errors,
     )
 
+
 # --- Tools ---
+
 
 def set_state(key: str, value: str) -> dict:
     """Utility function for agents to set values in the session state."""
@@ -71,6 +78,7 @@ def set_state(key: str, value: str) -> dict:
         logger.info(f"Set state: {key} = {value}")
     return {"status": "success", "message": f"Stored value in state key '{key}'", "key": key}
 
+
 def get_state(key: str) -> dict:
     """Utility function for agents to get values from the session state."""
     global _session
@@ -79,38 +87,40 @@ def get_state(key: str) -> dict:
         return {"status": "success", "value": value, "key": key}
     return {"status": "error", "message": f"Key '{key}' not found in state"}
 
+
 def check_for_potato() -> dict:
     """Check if 'potato' is in the user prompt or any stored clarification."""
     global _session
-    
+
     user_prompt = _session.state.get(STATE_USER_PROMPT, "").lower()
     clarifications_state = _session.state.get(STATE_CLARIFICATION, None)
-    
+
     # Check prompt first
-    has_potato_in_prompt = 'potato' in user_prompt
-    
+    has_potato_in_prompt = "potato" in user_prompt
+
     # Check clarifications (handling list or string)
     has_potato_in_clarifications = False
     if isinstance(clarifications_state, list):
-        has_potato_in_clarifications = any('potato' in str(item).lower() for item in clarifications_state)
+        has_potato_in_clarifications = any(
+            "potato" in str(item).lower() for item in clarifications_state
+        )
     elif isinstance(clarifications_state, str):
-        has_potato_in_clarifications = 'potato' in clarifications_state.lower()
-        
+        has_potato_in_clarifications = "potato" in clarifications_state.lower()
+
     # Combine checks
     has_potato = has_potato_in_prompt or has_potato_in_clarifications
-    
+
     # Set the needs_clarification state
     _session.state[STATE_NEEDS_CLARIFICATION] = not has_potato
-    
-    return {
-        "has_potato": has_potato,
-        "needs_clarification": not has_potato
-    }
+
+    return {"has_potato": has_potato, "needs_clarification": not has_potato}
+
 
 class ClarifierGenerator:
     """Synchronous function to get console input for clarification."""
+
     __name__ = "clarify_questions_tool"
-    
+
     def __call__(self):
         print("--- CONSOLE INPUT REQUIRED ---")
         prompt_message = "Could you please include the word 'potato' in your clarification? This is required to proceed: "
@@ -118,14 +128,17 @@ class ClarifierGenerator:
         print("--- CONSOLE INPUT RECEIVED ---")
         return {"reply": human_reply}
 
+
 # Change to standard FunctionTool wrapping the console-input function
 clarify_questions_tool = FunctionTool(func=ClarifierGenerator())
 
+
 def redirect_and_exit(tool_context: ToolContext) -> dict:
     """Stop the LoopAgent and transfer control to the specified external agent."""
-    tool_context.actions.escalate = True  
+    tool_context.actions.escalate = True
     tool_context.actions.transfer_to_agent = "FinalizerAgent"
     return {}
+
 
 # --- Agents ---
 
@@ -142,16 +155,13 @@ initial_agent = create_rate_limited_agent(
     If 'potato' is found, indicate that no clarification is needed.
     If 'potato' is not found, indicate that clarification will be needed.
     """,
-    tools=[
-        FunctionTool(func=set_state),
-        FunctionTool(func=check_for_potato)
-    ],
-    output_key=STATE_TEST_VARIABLE
+    tools=[FunctionTool(func=set_state), FunctionTool(func=check_for_potato)],
+    output_key=STATE_TEST_VARIABLE,
 )
 
 # Clarification Agent - asks for clarification if needed
 clarification_agent = create_rate_limited_agent(
-    name="ClarificationAgent", 
+    name="ClarificationAgent",
     model=GEMINI_MODEL,
     instruction=f"""
     You are the Clarification Agent. Your task is to:
@@ -165,14 +175,14 @@ clarification_agent = create_rate_limited_agent(
     tools=[
         clarify_questions_tool,
         FunctionTool(func=set_state),
-        FunctionTool(func=check_for_potato)
-    ]
+        FunctionTool(func=check_for_potato),
+    ],
 )
 
 # Decision Agent - makes the final decision
 decision_agent = create_rate_limited_agent(
     name="DecisionAgent",
-    model=GEMINI_MODEL, 
+    model=GEMINI_MODEL,
     instruction=f"""
     You are the Decision Agent. Your task is to:
     1. Check if '{STATE_NEEDS_CLARIFICATION}' is False (meaning 'potato' was found)
@@ -181,10 +191,7 @@ decision_agent = create_rate_limited_agent(
     
     Only call redirect_and_exit when the clarification process is complete.
     """,
-    tools=[
-        FunctionTool(func=get_state),
-        FunctionTool(func=redirect_and_exit)
-    ]
+    tools=[FunctionTool(func=get_state), FunctionTool(func=redirect_and_exit)],
 )
 
 # Finalizer Agent - provides the final response
@@ -201,26 +208,15 @@ finalizer_agent = create_rate_limited_agent(
     
     Be friendly and summarize the interaction.
     """,
-    tools=[FunctionTool(func=get_state)]
+    tools=[FunctionTool(func=get_state)],
 )
 
 # Create the loop agent that will repeatedly run until 'potato' is found
 potato_loop = LoopAgent(
     name="PotatoLoop",
-    sub_agents=[
-        initial_agent,
-        clarification_agent, 
-        decision_agent
-    ],
-    max_iterations=5  # Prevent infinite loops
+    sub_agents=[initial_agent, clarification_agent, decision_agent],
+    max_iterations=5,  # Prevent infinite loops
 )
 
 # Main sequential agent that runs the loop then the finalizer
-root_agent = SequentialAgent(
-    name="PotatoDecisionAgent",
-    sub_agents=[
-        potato_loop,
-        finalizer_agent
-    ]
-)
-
+root_agent = SequentialAgent(name="PotatoDecisionAgent", sub_agents=[potato_loop, finalizer_agent])
