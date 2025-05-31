@@ -293,16 +293,23 @@ class TestRateLimiterEdgeCases:
         # Assert
         assert len(limiter.call_history) == 5
 
-    def test_should_handle_negative_delay_gracefully(self, mock_logger):
-        """Should handle negative delay values gracefully."""
+    def test_should_handle_negative_delay_gracefully(self):
+        """Should handle negative delay gracefully by not going back in time."""
         # Arrange
-        limiter = RateLimiter(logger_instance=mock_logger)
-        current_time = time.time()
-
-        # Act
-        limiter.update_next_allowed_call_time(-5.0)
-
-        # Assert
-        # The implementation uses max() which means it sets the time in the past
-        # This is actually the current behavior, so adjust the test
-        assert limiter._next_allowed_call_time == current_time + (-5.0)
+        limiter = RateLimiter(max_calls=60, window_seconds=60)
+        
+        # Mock time to avoid timing race conditions  
+        with patch('time.time') as mock_time:
+            current_time = 1234567890.0
+            mock_time.return_value = current_time
+            
+            # Store initial next_allowed_call_time (should be 0)
+            initial_time = limiter._next_allowed_call_time
+            
+            # Act - Set a negative delay
+            limiter.update_next_allowed_call_time(-5.0)
+            
+            # Assert - Should use max() logic: max(initial_time, current_time + delay)
+            # max(0, 1234567890.0 + (-5.0)) = max(0, 1234567885.0) = 1234567885.0
+            expected_time = max(initial_time, current_time + (-5.0))
+            assert limiter._next_allowed_call_time == expected_time

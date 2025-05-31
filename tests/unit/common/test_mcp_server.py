@@ -262,11 +262,11 @@ class TestMCPServerImportHandling:
         """Should calculate project root path correctly."""
         # Act
         import common.mcp_server
-
+        
         # Assert - Project root should be accessible in sys.path
-        # The actual project directory is already there
-        project_root = "C:\\Users\\Alexey\\git\\coding-prompt-preprocessor"
-        assert project_root in sys.path
+        # Use current working directory for CI compatibility
+        current_project_root = os.getcwd()
+        assert current_project_root in sys.path
 
     def test_should_import_all_required_tools(self):
         """Should successfully import all required tool functions."""
