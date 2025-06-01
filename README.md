@@ -1,6 +1,6 @@
 # Cursor Prompt Preprocessor
 
-[![Tests](https://github.com/coding-prompt-preprocessor/coding-prompt-preprocessor/actions/workflows/test.yml/badge.svg)](https://github.com/coding-prompt-preprocessor/coding-prompt-preprocessor/actions/workflows/test.yml)
+[![Tests](https://github.com/oleksii-ai-code-pipelines/oleksii-ai-code-pipelines/actions/workflows/test.yml/badge.svg)](https://github.com/oleksii-ai-code-pipelines/oleksii-ai-code-pipelines/actions/workflows/test.yml)
 [![Python 3.10+](https://img.shields.io/badge/python-3.10+-blue.svg)](https://www.python.org/downloads/)
 [![Code style: black](https://img.shields.io/badge/code%20style-black-000000.svg)](https://github.com/psf/black)
 [![Imports: isort](https://img.shields.io/badge/%20imports-isort-%231674b1?style=flat&labelColor=ef8336)](https://pycqa.github.io/isort/)
@@ -126,7 +126,7 @@ from cursor_prompt_preprocessor.agent import root_agent
 
 ## CI/CD Pipeline
 
-[![Tests](https://github.com/coding-prompt-preprocessor/coding-prompt-preprocessor/actions/workflows/test.yml/badge.svg)](https://github.com/coding-prompt-preprocessor/coding-prompt-preprocessor/actions/workflows/test.yml)
+[![Tests](https://github.com/oleksii-ai-code-pipelines/oleksii-ai-code-pipelines/actions/workflows/test.yml/badge.svg)](https://github.com/oleksii-ai-code-pipelines/oleksii-ai-code-pipelines/actions/workflows/test.yml)
 
 The project includes a comprehensive GitHub Actions workflow ([`.github/workflows/test.yml`](.github/workflows/test.yml)) that runs on pull requests and pushes to main/develop branches.
 
@@ -144,8 +144,8 @@ The project includes a comprehensive GitHub Actions workflow ([`.github/workflow
 
 ### Quick Actions
 
-- **[View Latest Workflow Runs](https://github.com/coding-prompt-preprocessor/coding-prompt-preprocessor/actions)** - See current build status and history
-- **[Download Latest Coverage Report](https://github.com/coding-prompt-preprocessor/coding-prompt-preprocessor/actions/workflows/test.yml)** - Get detailed coverage analysis
+- **[View Latest Workflow Runs](https://github.com/oleksii-ai-code-pipelines/oleksii-ai-code-pipelines/actions)** - See current build status and history
+- **[Download Latest Coverage Report](https://github.com/oleksii-ai-code-pipelines/oleksii-ai-code-pipelines/actions/workflows/test.yml)** - Get detailed coverage analysis
 - **[View Workflow Configuration](.github/workflows/test.yml)** - Inspect the complete CI/CD setup
 
 ### Running Tests Locally
