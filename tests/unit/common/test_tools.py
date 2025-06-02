@@ -782,10 +782,12 @@ flask==2.0.1
         # Assert
         deps = result["dependencies"]
         assert "nodejs_package_json_error" in deps
-        assert (
-            "Expecting" in deps["nodejs_package_json_error"]
-            or "Invalid" in deps["nodejs_package_json_error"]
-        )
+        # More flexible assertion for different Python versions
+        error_message = deps["nodejs_package_json_error"]
+        error_indicators = ["Expecting", "Invalid", "Illegal", "trailing comma", "comma"]
+        assert any(
+            indicator in error_message for indicator in error_indicators
+        ), f"Expected JSON error message, got: {error_message}"
 
     def test_should_handle_no_dependency_files(self, temp_dir):
         """Should handle directory with no dependency files."""
