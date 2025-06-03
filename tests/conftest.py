@@ -76,21 +76,12 @@ def mock_logger():
     return logger
 
 
-@pytest_asyncio.fixture
-async def sample_session():
-    """Create a sample session for testing potato decision agent functionality."""
-    try:
-        from google.adk.sessions import InMemorySessionService
+@pytest.fixture
+def sample_session():
+    """Create a simple mock session for testing."""
 
-        session_service = InMemorySessionService()
-        session = await session_service.create_session(
-            app_name="test_app", user_id="test_user", session_id="test_session"
-        )
-        return session
-    except (ImportError, AttributeError):
-        # If google.adk is not available, create a mock session
-        class MockSession:
-            def __init__(self):
-                self.state = {}
+    class MockSession:
+        def __init__(self):
+            self.state = {}
 
-        return MockSession()
+    return MockSession()
