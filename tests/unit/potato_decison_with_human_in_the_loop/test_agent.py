@@ -14,14 +14,7 @@ try:
 except ImportError:
     InMemorySessionService = None
 
-
-class MockSession:
-    """Simple mock session for testing."""
-
-    def __init__(self):
-        self.state = {}
-
-
+from tests.conftest import MockSession
 from potato_decison_with_human_in_the_loop.agent import (
     APP_NAME,
     GEMINI_MODEL,

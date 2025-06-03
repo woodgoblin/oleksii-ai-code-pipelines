@@ -10,6 +10,12 @@ import pytest
 import pytest_asyncio
 
 
+class MockSession:
+    """Simple mock session for testing."""
+    def __init__(self):
+        self.state = {}
+
+
 @pytest.fixture
 def temp_dir():
     """Create a temporary directory for testing file operations.
@@ -79,9 +85,4 @@ def mock_logger():
 @pytest.fixture
 def sample_session():
     """Create a simple mock session for testing."""
-
-    class MockSession:
-        def __init__(self):
-            self.state = {}
-
     return MockSession()
