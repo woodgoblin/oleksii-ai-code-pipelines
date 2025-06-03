@@ -14,7 +14,6 @@ try:
 except ImportError:
     InMemorySessionService = None
 
-from tests.conftest import MockSession
 from potato_decison_with_human_in_the_loop.agent import (
     APP_NAME,
     GEMINI_MODEL,
@@ -33,6 +32,7 @@ from potato_decison_with_human_in_the_loop.agent import (
     set_session,
     set_state,
 )
+from tests.conftest import MockSession
 
 
 class TestSessionUtilityFunctions:

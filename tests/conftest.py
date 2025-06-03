@@ -12,6 +12,7 @@ import pytest_asyncio
 
 class MockSession:
     """Simple mock session for testing."""
+
     def __init__(self):
         self.state = {}
 
