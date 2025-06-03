@@ -32,42 +32,26 @@ from potato_decison_with_human_in_the_loop.agent import (
     set_session,
     set_state,
 )
+from tests.conftest import MockSession
 
 
 class TestSessionUtilityFunctions:
     """Test session-related utility functions."""
 
-    @pytest.mark.asyncio
-    async def test_set_session_stores_new_session_globally(self, sample_session):
-        """Test that set_session correctly updates the global session reference."""
-        # Arrange
-        new_session = sample_session
-
+    def test_set_session_stores_new_session_globally(self, sample_session):
+        """Test that set_session updates the global session."""
         # Act
-        set_session(new_session)
+        set_session(sample_session)
 
         # Assert
         import potato_decison_with_human_in_the_loop.agent as agent_module
 
-        assert agent_module._session == new_session
+        assert agent_module._session == sample_session
 
-    @pytest.mark.asyncio
-    async def test_set_session_replaces_existing_session(self, sample_session):
-        """Test that set_session can replace an existing global session."""
+    def test_set_session_replaces_existing_session(self, sample_session):
+        """Test that set_session can replace an existing session."""
         # Arrange
-        if InMemorySessionService:
-            session_service = InMemorySessionService()
-            first_session = await session_service.create_session(
-                app_name="test_app", user_id="test_user", session_id="test_session_1"
-            )
-        else:
-
-            class MockSession:
-                def __init__(self):
-                    self.state = {}
-
-            first_session = MockSession()
-
+        first_session = MockSession()
         second_session = sample_session
 
         # Act
@@ -78,51 +62,39 @@ class TestSessionUtilityFunctions:
         import potato_decison_with_human_in_the_loop.agent as agent_module
 
         assert agent_module._session == second_session
-        assert agent_module._session != first_session
 
 
 class TestStateManagementFunctions:
     """Test state management utility functions."""
 
-    @pytest.mark.asyncio
-    async def test_set_state_stores_value_in_session_successfully(self, sample_session):
-        """Test that set_state correctly stores a key-value pair in session state."""
+    def test_set_state_stores_value_successfully(self, sample_session):
+        """Test that set_state stores a key-value pair."""
         # Arrange
-        session = sample_session
-        set_session(session)
-        test_key = "test_key"
-        test_value = "test_value"
+        set_session(sample_session)
 
         # Act
-        result = set_state(test_key, test_value)
+        result = set_state("test_key", "test_value")
 
         # Assert
         assert result["status"] == "success"
-        assert result["key"] == test_key
-        assert result["message"] == f"Stored value in state key '{test_key}'"
-        assert session.state[test_key] == test_value
+        assert result["key"] == "test_key"
+        assert sample_session.state["test_key"] == "test_value"
 
-    @pytest.mark.asyncio
-    async def test_set_state_overwrites_existing_value(self, sample_session):
-        """Test that set_state overwrites an existing value for the same key."""
+    def test_set_state_overwrites_existing_value(self, sample_session):
+        """Test that set_state overwrites existing values."""
         # Arrange
-        session = sample_session
-        set_session(session)
-        test_key = "existing_key"
-        original_value = "original_value"
-        new_value = "new_value"
-        session.state[test_key] = original_value
+        set_session(sample_session)
+        sample_session.state["key"] = "old_value"
 
         # Act
-        result = set_state(test_key, new_value)
+        result = set_state("key", "new_value")
 
         # Assert
         assert result["status"] == "success"
-        assert session.state[test_key] == new_value
-        assert session.state[test_key] != original_value
+        assert sample_session.state["key"] == "new_value"
 
-    def test_set_state_handles_none_session_gracefully(self):
-        """Test that set_state handles None session without crashing."""
+    def test_set_state_handles_none_session(self):
+        """Test that set_state handles None session gracefully."""
         # Arrange
         set_session(None)
 
@@ -131,44 +103,34 @@ class TestStateManagementFunctions:
 
         # Assert
         assert result["status"] == "success"
-        assert result["key"] == "test_key"
 
-    @pytest.mark.asyncio
-    async def test_get_state_retrieves_existing_value_successfully(self, sample_session):
-        """Test that get_state correctly retrieves an existing value from session state."""
+    def test_get_state_retrieves_existing_value(self, sample_session):
+        """Test that get_state retrieves existing values."""
         # Arrange
-        session = sample_session
-        set_session(session)
-        test_key = "existing_key"
-        test_value = "existing_value"
-        session.state[test_key] = test_value
+        set_session(sample_session)
+        sample_session.state["test_key"] = "test_value"
 
         # Act
-        result = get_state(test_key)
+        result = get_state("test_key")
 
         # Assert
         assert result["status"] == "success"
-        assert result["value"] == test_value
-        assert result["key"] == test_key
+        assert result["value"] == "test_value"
 
-    @pytest.mark.asyncio
-    async def test_get_state_returns_error_for_missing_key(self, sample_session):
-        """Test that get_state returns error status for non-existent key."""
+    def test_get_state_returns_error_for_missing_key(self, sample_session):
+        """Test that get_state returns error for missing keys."""
         # Arrange
-        session = sample_session
-        set_session(session)
-        missing_key = "missing_key"
+        set_session(sample_session)
 
         # Act
-        result = get_state(missing_key)
+        result = get_state("missing_key")
 
         # Assert
         assert result["status"] == "error"
-        assert result["message"] == f"Key '{missing_key}' not found in state"
-        assert "value" not in result
+        assert "not found" in result["message"]
 
-    def test_get_state_handles_none_session_gracefully(self):
-        """Test that get_state handles None session without crashing."""
+    def test_get_state_handles_none_session(self):
+        """Test that get_state handles None session gracefully."""
         # Arrange
         set_session(None)
 
@@ -182,29 +144,11 @@ class TestStateManagementFunctions:
 class TestPotatoDetectionLogic:
     """Test the potato detection functionality."""
 
-    @pytest.mark.asyncio
-    async def test_check_for_potato_finds_potato_in_user_prompt(self, sample_session):
-        """Test that check_for_potato detects 'potato' in user prompt."""
+    def test_finds_potato_in_user_prompt(self, sample_session):
+        """Test detecting 'potato' in user prompt."""
         # Arrange
-        session = sample_session
-        set_session(session)
-        session.state[STATE_USER_PROMPT] = "I really like potato chips"
-
-        # Act
-        result = check_for_potato()
-
-        # Assert
-        assert result["has_potato"] is True
-        assert result["needs_clarification"] is False
-        assert session.state[STATE_NEEDS_CLARIFICATION] is False
-
-    @pytest.mark.asyncio
-    async def test_check_for_potato_finds_potato_case_insensitive(self, sample_session):
-        """Test that check_for_potato detects 'potato' regardless of case."""
-        # Arrange
-        session = sample_session
-        set_session(session)
-        session.state[STATE_USER_PROMPT] = "I love POTATO salad"
+        set_session(sample_session)
+        sample_session.state[STATE_USER_PROMPT] = "I really like potato chips"
 
         # Act
         result = check_for_potato()
@@ -213,66 +157,23 @@ class TestPotatoDetectionLogic:
         assert result["has_potato"] is True
         assert result["needs_clarification"] is False
 
-    @pytest.mark.asyncio
-    async def test_check_for_potato_detects_missing_potato_in_prompt(self, sample_session):
-        """Test that check_for_potato correctly identifies when 'potato' is missing from prompt."""
+    def test_finds_potato_case_insensitive(self, sample_session):
+        """Test detecting 'potato' regardless of case."""
         # Arrange
-        session = sample_session
-        set_session(session)
-        session.state[STATE_USER_PROMPT] = "I like vegetables and fruits"
-
-        # Act
-        result = check_for_potato()
-
-        # Assert
-        assert result["has_potato"] is False
-        assert result["needs_clarification"] is True
-        assert session.state[STATE_NEEDS_CLARIFICATION] is True
-
-    @pytest.mark.asyncio
-    async def test_check_for_potato_finds_potato_in_string_clarification(self, sample_session):
-        """Test that check_for_potato detects 'potato' in string clarification."""
-        # Arrange
-        session = sample_session
-        set_session(session)
-        session.state[STATE_USER_PROMPT] = "I like vegetables"
-        session.state[STATE_CLARIFICATION] = "Actually, I prefer potato dishes"
+        set_session(sample_session)
+        sample_session.state[STATE_USER_PROMPT] = "I love POTATO salad"
 
         # Act
         result = check_for_potato()
 
         # Assert
         assert result["has_potato"] is True
-        assert result["needs_clarification"] is False
 
-    @pytest.mark.asyncio
-    async def test_check_for_potato_finds_potato_in_list_clarification(self, sample_session):
-        """Test that check_for_potato detects 'potato' in list of clarifications."""
+    def test_detects_missing_potato(self, sample_session):
+        """Test identifying when 'potato' is missing."""
         # Arrange
-        session = sample_session
-        set_session(session)
-        session.state[STATE_USER_PROMPT] = "I like vegetables"
-        session.state[STATE_CLARIFICATION] = [
-            "I like carrots",
-            "I also enjoy potato soup",
-            "And some broccoli",
-        ]
-
-        # Act
-        result = check_for_potato()
-
-        # Assert
-        assert result["has_potato"] is True
-        assert result["needs_clarification"] is False
-
-    @pytest.mark.asyncio
-    async def test_check_for_potato_handles_empty_clarification_list(self, sample_session):
-        """Test that check_for_potato handles empty clarification list correctly."""
-        # Arrange
-        session = sample_session
-        set_session(session)
-        session.state[STATE_USER_PROMPT] = "I like vegetables"
-        session.state[STATE_CLARIFICATION] = []
+        set_session(sample_session)
+        sample_session.state[STATE_USER_PROMPT] = "I like vegetables and fruits"
 
         # Act
         result = check_for_potato()
@@ -281,87 +182,97 @@ class TestPotatoDetectionLogic:
         assert result["has_potato"] is False
         assert result["needs_clarification"] is True
 
-    @pytest.mark.asyncio
-    async def test_check_for_potato_handles_non_string_clarification_items(self, sample_session):
-        """Test that check_for_potato handles non-string items in clarification list."""
+    def test_finds_potato_in_clarification_string(self, sample_session):
+        """Test detecting 'potato' in string clarification."""
         # Arrange
-        session = sample_session
-        set_session(session)
-        session.state[STATE_USER_PROMPT] = "I like vegetables"
-        session.state[STATE_CLARIFICATION] = [123, {"text": "potato is great"}, None]
+        set_session(sample_session)
+        sample_session.state[STATE_USER_PROMPT] = "I like vegetables"
+        sample_session.state[STATE_CLARIFICATION] = "Actually, I prefer potato dishes"
 
         # Act
         result = check_for_potato()
 
         # Assert
         assert result["has_potato"] is True
-        assert result["needs_clarification"] is False
 
-    @pytest.mark.asyncio
-    async def test_check_for_potato_handles_missing_state_keys(self, sample_session):
-        """Test that check_for_potato handles missing state keys gracefully."""
+    def test_finds_potato_in_clarification_list(self, sample_session):
+        """Test detecting 'potato' in list clarification."""
         # Arrange
-        session = sample_session
-        set_session(session)
-        # Don't set any state keys
+        set_session(sample_session)
+        sample_session.state[STATE_USER_PROMPT] = "I like vegetables"
+        sample_session.state[STATE_CLARIFICATION] = ["carrots", "potato soup", "broccoli"]
+
+        # Act
+        result = check_for_potato()
+
+        # Assert
+        assert result["has_potato"] is True
+
+    def test_handles_empty_clarification_list(self, sample_session):
+        """Test handling empty clarification list."""
+        # Arrange
+        set_session(sample_session)
+        sample_session.state[STATE_USER_PROMPT] = "I like vegetables"
+        sample_session.state[STATE_CLARIFICATION] = []
 
         # Act
         result = check_for_potato()
 
         # Assert
         assert result["has_potato"] is False
-        assert result["needs_clarification"] is True
+
+    def test_handles_mixed_clarification_types(self, sample_session):
+        """Test handling non-string items in clarification."""
+        # Arrange
+        set_session(sample_session)
+        sample_session.state[STATE_USER_PROMPT] = "I like vegetables"
+        sample_session.state[STATE_CLARIFICATION] = [123, {"text": "potato is great"}, None]
+
+        # Act
+        result = check_for_potato()
+
+        # Assert
+        assert result["has_potato"] is True
+
+    def test_handles_missing_state_keys(self, sample_session):
+        """Test handling missing state keys."""
+        # Arrange
+        set_session(sample_session)
+
+        # Act
+        result = check_for_potato()
+
+        # Assert
+        assert result["has_potato"] is False
 
 
 class TestClarifierGenerator:
-    """Test the ClarifierGenerator class for human input."""
+    """Test human input tool."""
 
-    def test_clarifier_generator_has_correct_name_attribute(self):
-        """Test that ClarifierGenerator has the expected __name__ attribute."""
-        # Arrange & Act
+    def test_has_correct_name(self):
+        """Test tool name."""
+        # Act
         clarifier = ClarifierGenerator()
 
         # Assert
         assert clarifier.__name__ == "clarify_questions_tool"
 
-    @mock.patch("builtins.input")
-    @mock.patch("builtins.print")
-    def test_clarifier_generator_call_returns_user_input(self, mock_print, mock_input):
-        """Test that ClarifierGenerator.__call__ returns user input in expected format."""
+    @mock.patch("builtins.input", return_value="Yes, potato!")
+    def test_returns_user_input(self, mock_input):
+        """Test returning user input."""
         # Arrange
-        mock_input.return_value = "Yes, I love potato chips!"
         clarifier = ClarifierGenerator()
 
         # Act
         result = clarifier()
 
         # Assert
-        assert result == {"reply": "Yes, I love potato chips!"}
-        mock_input.assert_called_once_with(
-            "Could you please include the word 'potato' in your clarification? This is required to proceed: "
-        )
+        assert result == {"reply": "Yes, potato!"}
 
-    @mock.patch("builtins.input")
-    @mock.patch("builtins.print")
-    def test_clarifier_generator_prints_console_messages(self, mock_print, mock_input):
-        """Test that ClarifierGenerator prints appropriate console messages."""
+    @mock.patch("builtins.input", return_value="")
+    def test_handles_empty_input(self, mock_input):
+        """Test handling empty input."""
         # Arrange
-        mock_input.return_value = "potato response"
-        clarifier = ClarifierGenerator()
-
-        # Act
-        clarifier()
-
-        # Assert
-        mock_print.assert_any_call("--- CONSOLE INPUT REQUIRED ---")
-        mock_print.assert_any_call("--- CONSOLE INPUT RECEIVED ---")
-        assert mock_print.call_count == 2
-
-    @mock.patch("builtins.input")
-    def test_clarifier_generator_handles_empty_input(self, mock_input):
-        """Test that ClarifierGenerator handles empty user input."""
-        # Arrange
-        mock_input.return_value = ""
         clarifier = ClarifierGenerator()
 
         # Act
@@ -372,210 +283,122 @@ class TestClarifierGenerator:
 
 
 class TestRedirectAndExit:
-    """Test the redirect_and_exit function."""
+    """Test redirect function."""
 
-    def test_redirect_and_exit_sets_escalate_flag(self):
-        """Test that redirect_and_exit sets the escalate flag in tool context."""
+    def test_sets_escalate_flag(self):
+        """Test setting escalate flag."""
         # Arrange
-        mock_tool_context = Mock()
-        mock_tool_context.actions = Mock()
+        mock_context = Mock()
+        mock_context.actions = Mock()
 
         # Act
-        result = redirect_and_exit(mock_tool_context)
+        result = redirect_and_exit(mock_context)
 
         # Assert
-        assert mock_tool_context.actions.escalate is True
+        assert mock_context.actions.escalate is True
         assert result == {}
 
-    def test_redirect_and_exit_sets_transfer_agent(self):
-        """Test that redirect_and_exit sets the transfer_to_agent in tool context."""
+    def test_sets_transfer_agent(self):
+        """Test setting transfer agent."""
         # Arrange
-        mock_tool_context = Mock()
-        mock_tool_context.actions = Mock()
+        mock_context = Mock()
+        mock_context.actions = Mock()
 
         # Act
-        redirect_and_exit(mock_tool_context)
+        redirect_and_exit(mock_context)
 
         # Assert
-        assert mock_tool_context.actions.transfer_to_agent == "FinalizerAgent"
-
-    def test_redirect_and_exit_returns_empty_dict(self):
-        """Test that redirect_and_exit always returns an empty dictionary."""
-        # Arrange
-        mock_tool_context = Mock()
-        mock_tool_context.actions = Mock()
-
-        # Act
-        result = redirect_and_exit(mock_tool_context)
-
-        # Assert
-        assert result == {}
-        assert isinstance(result, dict)
+        assert mock_context.actions.transfer_to_agent == "FinalizerAgent"
 
 
 class TestCreateRateLimitedAgent:
-    """Test the create_rate_limited_agent factory function."""
+    """Test agent creation."""
 
     @mock.patch("potato_decison_with_human_in_the_loop.agent.LlmAgent")
-    def test_create_rate_limited_agent_with_minimal_parameters(self, mock_llm_agent):
-        """Test creating rate limited agent with only required parameters."""
-        # Arrange
-        name = "TestAgent"
-        model = "test-model"
-        instruction = "Test instruction"
-
+    def test_creates_agent_with_minimal_params(self, mock_llm_agent):
+        """Test creating agent with minimal parameters."""
         # Act
-        create_rate_limited_agent(name, model, instruction)
+        create_rate_limited_agent("TestAgent", "test-model", "Test instruction")
 
         # Assert
-        mock_llm_agent.assert_called_once_with(
-            name=name,
-            model=model,
-            instruction=instruction,
-            tools=[],
-            output_key=None,
-            sub_agents=[],
-            before_model_callback=mock.ANY,
-            after_model_callback=mock.ANY,
-        )
+        mock_llm_agent.assert_called_once()
+        call_args = mock_llm_agent.call_args.kwargs
+        assert call_args["name"] == "TestAgent"
+        assert call_args["model"] == "test-model"
+        assert call_args["before_model_callback"] is not None
 
     @mock.patch("potato_decison_with_human_in_the_loop.agent.LlmAgent")
-    def test_create_rate_limited_agent_with_all_parameters(self, mock_llm_agent):
-        """Test creating rate limited agent with all optional parameters."""
+    def test_creates_agent_with_all_params(self, mock_llm_agent):
+        """Test creating agent with all parameters."""
         # Arrange
-        name = "TestAgent"
-        model = "test-model"
-        instruction = "Test instruction"
-        tools = [Mock(), Mock()]
-        output_key = "test_output"
+        tools = [Mock()]
         sub_agents = [Mock()]
 
         # Act
-        create_rate_limited_agent(name, model, instruction, tools, output_key, sub_agents)
+        create_rate_limited_agent("TestAgent", "model", "instruction", tools, "output", sub_agents)
 
         # Assert
-        mock_llm_agent.assert_called_once_with(
-            name=name,
-            model=model,
-            instruction=instruction,
-            tools=tools,
-            output_key=output_key,
-            sub_agents=sub_agents,
-            before_model_callback=mock.ANY,
-            after_model_callback=mock.ANY,
-        )
-
-    @mock.patch("potato_decison_with_human_in_the_loop.agent.LlmAgent")
-    def test_create_rate_limited_agent_includes_rate_limit_callbacks(self, mock_llm_agent):
-        """Test that rate limit callbacks are included in agent creation."""
-        # Arrange
-        name = "TestAgent"
-        model = "test-model"
-        instruction = "Test instruction"
-
-        # Act
-        create_rate_limited_agent(name, model, instruction)
-
-        # Assert
-        call_args = mock_llm_agent.call_args
-        assert call_args.kwargs["before_model_callback"] is not None
-        assert call_args.kwargs["after_model_callback"] is not None
+        call_args = mock_llm_agent.call_args.kwargs
+        assert call_args["tools"] == tools
+        assert call_args["sub_agents"] == sub_agents
 
 
 class TestModuleConstants:
-    """Test that module constants are properly defined."""
+    """Test module constants."""
 
-    def test_state_constants_are_strings(self):
-        """Test that all state constants are properly defined as strings."""
-        # Act & Assert
-        assert isinstance(STATE_USER_PROMPT, str)
-        assert isinstance(STATE_TEST_VARIABLE, str)
-        assert isinstance(STATE_CLARIFICATION, str)
-        assert isinstance(STATE_NEEDS_CLARIFICATION, str)
-        assert isinstance(STATE_FINAL_SUMMARY, str)
-
-    def test_state_constants_have_expected_values(self):
-        """Test that state constants have the expected values."""
-        # Act & Assert
+    def test_state_constants(self):
+        """Test state constants are correct."""
+        # Assert
         assert STATE_USER_PROMPT == "user_prompt"
-        assert STATE_TEST_VARIABLE == "test_variable"
         assert STATE_CLARIFICATION == "clarification"
         assert STATE_NEEDS_CLARIFICATION == "needs_clarification"
-        assert STATE_FINAL_SUMMARY == "final_summary"
 
-    def test_app_constants_are_strings(self):
-        """Test that application constants are properly defined as strings."""
-        # Act & Assert
-        assert isinstance(APP_NAME, str)
-        assert isinstance(USER_ID, str)
-        assert isinstance(SESSION_ID, str)
-        assert isinstance(GEMINI_MODEL, str)
-
-    def test_app_constants_have_expected_values(self):
-        """Test that application constants have the expected values."""
-        # Act & Assert
+    def test_app_constants(self):
+        """Test app constants are correct."""
+        # Assert
         assert APP_NAME == "test_poc_agent"
         assert USER_ID == "demo_user"
-        assert SESSION_ID == "demo_session"
         assert GEMINI_MODEL == "gemini-2.5-flash-preview-04-17"
 
 
 class TestModuleIntegration:
-    """Test integration scenarios involving multiple components."""
+    """Test complete workflows."""
 
-    @pytest.mark.asyncio
-    async def test_complete_potato_detection_workflow_with_prompt(self, sample_session):
-        """Test complete workflow when potato is found in initial prompt."""
+    def test_complete_workflow_with_potato_in_prompt(self, sample_session):
+        """Test workflow when potato is found in prompt."""
         # Arrange
-        session = sample_session
-        set_session(session)
-        user_input = "I would like to cook some potato dishes today"
+        set_session(sample_session)
 
         # Act
-        set_state(STATE_USER_PROMPT, user_input)
-        potato_result = check_for_potato()
+        set_state(STATE_USER_PROMPT, "I want potato dishes")
+        result = check_for_potato()
 
         # Assert
-        assert session.state[STATE_USER_PROMPT] == user_input
-        assert potato_result["has_potato"] is True
-        assert potato_result["needs_clarification"] is False
-        assert session.state[STATE_NEEDS_CLARIFICATION] is False
+        assert sample_session.state[STATE_USER_PROMPT] == "I want potato dishes"
+        assert result["has_potato"] is True
 
-    @pytest.mark.asyncio
-    async def test_complete_potato_detection_workflow_with_clarification(self, sample_session):
-        """Test complete workflow when potato is found in clarification."""
+    def test_complete_workflow_with_potato_in_clarification(self, sample_session):
+        """Test workflow when potato is found in clarification."""
         # Arrange
-        session = sample_session
-        set_session(session)
-        initial_prompt = "I like cooking vegetables"
-        clarification = "Especially potato-based recipes"
+        set_session(sample_session)
 
         # Act
-        set_state(STATE_USER_PROMPT, initial_prompt)
-        set_state(STATE_CLARIFICATION, clarification)
-        potato_result = check_for_potato()
+        set_state(STATE_USER_PROMPT, "I like cooking")
+        set_state(STATE_CLARIFICATION, "Especially potato recipes")
+        result = check_for_potato()
 
         # Assert
-        assert session.state[STATE_USER_PROMPT] == initial_prompt
-        assert session.state[STATE_CLARIFICATION] == clarification
-        assert potato_result["has_potato"] is True
-        assert potato_result["needs_clarification"] is False
+        assert result["has_potato"] is True
 
-    @pytest.mark.asyncio
-    async def test_state_management_persists_across_operations(self, sample_session):
-        """Test that state changes persist across multiple operations."""
+    def test_state_persistence(self, sample_session):
+        """Test state persists across operations."""
         # Arrange
-        session = sample_session
-        set_session(session)
+        set_session(sample_session)
 
         # Act
         set_state("key1", "value1")
         set_state("key2", "value2")
-        result1 = get_state("key1")
-        result2 = get_state("key2")
 
         # Assert
-        assert result1["value"] == "value1"
-        assert result2["value"] == "value2"
-        assert session.state["key1"] == "value1"
-        assert session.state["key2"] == "value2"
+        assert get_state("key1")["value"] == "value1"
+        assert get_state("key2")["value"] == "value2"

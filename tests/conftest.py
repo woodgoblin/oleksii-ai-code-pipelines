@@ -10,6 +10,13 @@ import pytest
 import pytest_asyncio
 
 
+class MockSession:
+    """Simple mock session for testing."""
+
+    def __init__(self):
+        self.state = {}
+
+
 @pytest.fixture
 def temp_dir():
     """Create a temporary directory for testing file operations.
@@ -76,21 +83,7 @@ def mock_logger():
     return logger
 
 
-@pytest_asyncio.fixture
-async def sample_session():
-    """Create a sample session for testing potato decision agent functionality."""
-    try:
-        from google.adk.sessions import InMemorySessionService
-
-        session_service = InMemorySessionService()
-        session = await session_service.create_session(
-            app_name="test_app", user_id="test_user", session_id="test_session"
-        )
-        return session
-    except (ImportError, AttributeError):
-        # If google.adk is not available, create a mock session
-        class MockSession:
-            def __init__(self):
-                self.state = {}
-
-        return MockSession()
+@pytest.fixture
+def sample_session():
+    """Create a simple mock session for testing."""
+    return MockSession()
