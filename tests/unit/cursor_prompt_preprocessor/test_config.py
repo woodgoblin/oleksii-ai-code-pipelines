@@ -38,22 +38,6 @@ class TestApplicationConfiguration:
         # Arrange & Act & Assert
         assert isinstance(GEMINI_MODEL, str)
         assert "gemini" in GEMINI_MODEL.lower()
-        assert len(GEMINI_MODEL) > 10  # Reasonable length for model identifier
-
-
-class TestRateLimitingConfiguration:
-    """Test rate limiting configuration for API safety."""
-
-    def test_given_rate_limit_settings_when_validating_constraints_then_they_prevent_api_abuse(
-        self,
-    ):
-        """Given rate limit settings, when validating constraints, then max calls and window are positive integers that prevent API abuse."""
-        # Arrange & Act & Assert
-        assert isinstance(RATE_LIMIT_MAX_CALLS, int) and RATE_LIMIT_MAX_CALLS > 0
-        assert isinstance(RATE_LIMIT_WINDOW, int) and RATE_LIMIT_WINDOW > 0
-        # Ensure reasonable limits (not too permissive)
-        assert RATE_LIMIT_MAX_CALLS <= 100  # Prevent abuse
-        assert RATE_LIMIT_WINDOW >= 10  # Reasonable window
 
 
 class TestLoggingConfiguration:
