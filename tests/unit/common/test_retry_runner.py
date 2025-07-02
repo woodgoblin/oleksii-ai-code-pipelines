@@ -218,17 +218,7 @@ class TestEnhancedRunner:
         mock_session_service = Mock()
 
         # Act
-        with patch("builtins.__import__") as mock_import:
-
-            def import_side_effect(name, *args, **kwargs):
-                if name == "google.adk.runner":
-                    mock_runner_module = Mock()
-                    mock_runner_module.Runner = Mock()
-                    return mock_runner_module
-                return __import__(name, *args, **kwargs)
-
-            mock_import.side_effect = import_side_effect
-
+        with patch("google.adk.Runner", Mock()) as mock_runner_class:
             runner = create_enhanced_runner(
                 agent=mock_agent,
                 app_name="test_app",
@@ -251,27 +241,16 @@ class TestEnhancedRunner:
         mock_session_service = Mock()
         mock_events = ["event1", "event2"]
 
-        with patch("builtins.__import__") as mock_import:
+        mock_original_runner = Mock()
 
-            def import_side_effect(name, *args, **kwargs):
-                if name == "google.adk.runner":
-                    mock_runner_module = Mock()
-                    mock_runner_class = Mock()
-                    mock_original_runner = Mock()
+        # Mock the async generator
+        async def mock_run_async(*args, **kwargs):
+            for event in mock_events:
+                yield event
 
-                    # Mock the async generator
-                    async def mock_run_async(*args, **kwargs):
-                        for event in mock_events:
-                            yield event
+        mock_original_runner.run_async = mock_run_async
 
-                    mock_original_runner.run_async = mock_run_async
-                    mock_runner_class.return_value = mock_original_runner
-                    mock_runner_module.Runner = mock_runner_class
-                    return mock_runner_module
-                return __import__(name, *args, **kwargs)
-
-            mock_import.side_effect = import_side_effect
-
+        with patch("google.adk.Runner", return_value=mock_original_runner) as mock_runner_class:
             runner = create_enhanced_runner(
                 agent=mock_agent,
                 app_name="test_app",
@@ -295,17 +274,7 @@ class TestEnhancedRunner:
         mock_session_service = Mock()
 
         # Act
-        with patch("builtins.__import__") as mock_import:
-
-            def import_side_effect(name, *args, **kwargs):
-                if name == "google.adk.runner":
-                    mock_runner_module = Mock()
-                    mock_runner_module.Runner = Mock()
-                    return mock_runner_module
-                return __import__(name, *args, **kwargs)
-
-            mock_import.side_effect = import_side_effect
-
+        with patch("google.adk.Runner", Mock()) as mock_runner_class:
             runner = create_enhanced_runner(
                 agent=mock_agent, app_name="test_app", session_service=mock_session_service
             )  # No optional parameters

@@ -446,20 +446,17 @@ def set_session_state(
     return {"status": "warning", "message": f"No context available for key '{key}'"}
 
 
-def get_session_state(
-    key: str, default_value: str = "", tool_context: ToolContext | None = None
-) -> str:
-    """Retrieve value from session state as JSON string."""
+def get_session_state(key: str, default_value=None, tool_context: ToolContext | None = None):
+    """Retrieve value from session state."""
     if tool_context and hasattr(tool_context, "state"):
         value = tool_context.state.get(key, default_value)
-        # Return JSON string representation for consistency
-        if isinstance(value, str):
-            return value
-        else:
+        # For ADK compatibility, convert complex objects to JSON strings
+        if isinstance(value, (dict, list)):
             try:
-                return json.dumps(value) if value is not None else default_value
+                return json.dumps(value)
             except (TypeError, ValueError):
-                return str(value) if value is not None else default_value
+                return str(value)
+        return value
     return default_value
 
 

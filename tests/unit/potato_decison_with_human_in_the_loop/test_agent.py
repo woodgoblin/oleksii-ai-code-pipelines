@@ -4,6 +4,8 @@ This module tests the agent functionality that implements a human-in-the-loop
 decision process requiring 'potato' to be included in user responses.
 """
 
+# type: ignore
+
 import unittest.mock as mock
 from unittest.mock import MagicMock, Mock
 
@@ -11,260 +13,239 @@ import pytest
 
 try:
     from google.adk.sessions import InMemorySessionService
+    from google.adk.tools import ToolContext
 except ImportError:
     InMemorySessionService = None
+    ToolContext = None
 
 from potato_decison_with_human_in_the_loop.agent import (
-    APP_NAME,
     GEMINI_MODEL,
-    SESSION_ID,
     STATE_CLARIFICATION,
     STATE_FINAL_SUMMARY,
     STATE_NEEDS_CLARIFICATION,
     STATE_TEST_VARIABLE,
     STATE_USER_PROMPT,
-    USER_ID,
-    ClarifierGenerator,
     check_for_potato,
+    clarify_questions_tool_func,
     create_rate_limited_agent,
-    get_state,
+    get_state_tool,
     redirect_and_exit,
-    set_session,
-    set_state,
+    set_state_tool,
 )
-from tests.conftest import MockSession
 
 
-class TestSessionUtilityFunctions:
-    """Test session-related utility functions."""
+class MockToolContext:
+    """Mock tool context for testing."""
 
-    def test_set_session_stores_new_session_globally(self, sample_session):
-        """Test that set_session updates the global session."""
-        # Act
-        set_session(sample_session)
+    def __init__(self):
+        self.state = {}
+        self.actions = Mock()
 
-        # Assert
-        import potato_decison_with_human_in_the_loop.agent as agent_module
 
-        assert agent_module._session == sample_session
+class TestStateConstants:
+    """Test state constants."""
 
-    def test_set_session_replaces_existing_session(self, sample_session):
-        """Test that set_session can replace an existing session."""
+    def test_state_constants_exist(self):
+        """Test that state constants are defined."""
+        assert STATE_USER_PROMPT == "user_prompt"
+        assert STATE_CLARIFICATION == "clarification"
+        assert STATE_NEEDS_CLARIFICATION == "needs_clarification"
+        assert STATE_TEST_VARIABLE == "test_variable"
+        assert STATE_FINAL_SUMMARY == "final_summary"
+
+    def test_gemini_model_constant(self):
+        """Test that GEMINI_MODEL is defined."""
+        assert GEMINI_MODEL == "gemini-2.5-flash-preview-04-17"
+
+
+class TestSetStateTool:
+    """Test the set_state_tool function."""
+
+    def test_sets_state_with_context(self):
+        """Test setting state with valid context."""
         # Arrange
-        first_session = MockSession()
-        second_session = sample_session
+        mock_context = MockToolContext()
 
         # Act
-        set_session(first_session)
-        set_session(second_session)
-
-        # Assert
-        import potato_decison_with_human_in_the_loop.agent as agent_module
-
-        assert agent_module._session == second_session
-
-
-class TestStateManagementFunctions:
-    """Test state management utility functions."""
-
-    def test_set_state_stores_value_successfully(self, sample_session):
-        """Test that set_state stores a key-value pair."""
-        # Arrange
-        set_session(sample_session)
-
-        # Act
-        result = set_state("test_key", "test_value")
+        result = set_state_tool("test_key", "test_value", mock_context)  # type: ignore
 
         # Assert
         assert result["status"] == "success"
         assert result["key"] == "test_key"
-        assert sample_session.state["test_key"] == "test_value"
+        assert mock_context.state["test_key"] == "test_value"
 
-    def test_set_state_overwrites_existing_value(self, sample_session):
-        """Test that set_state overwrites existing values."""
-        # Arrange
-        set_session(sample_session)
-        sample_session.state["key"] = "old_value"
-
+    def test_handles_no_context(self):
+        """Test handling no tool context."""
         # Act
-        result = set_state("key", "new_value")
+        result = set_state_tool("test_key", "test_value", None)
 
         # Assert
-        assert result["status"] == "success"
-        assert sample_session.state["key"] == "new_value"
+        assert result["status"] == "error"
+        assert "No tool context available" in result["message"]
 
-    def test_set_state_handles_none_session(self):
-        """Test that set_state handles None session gracefully."""
+
+class TestGetStateTool:
+    """Test the get_state_tool function."""
+
+    def test_gets_existing_state(self):
+        """Test getting existing state value."""
         # Arrange
-        set_session(None)
+        mock_context = MockToolContext()
+        mock_context.state["test_key"] = "test_value"
 
         # Act
-        result = set_state("test_key", "test_value")
-
-        # Assert
-        assert result["status"] == "success"
-
-    def test_get_state_retrieves_existing_value(self, sample_session):
-        """Test that get_state retrieves existing values."""
-        # Arrange
-        set_session(sample_session)
-        sample_session.state["test_key"] = "test_value"
-
-        # Act
-        result = get_state("test_key")
+        result = get_state_tool("test_key", mock_context)
 
         # Assert
         assert result["status"] == "success"
         assert result["value"] == "test_value"
 
-    def test_get_state_returns_error_for_missing_key(self, sample_session):
-        """Test that get_state returns error for missing keys."""
+    def test_handles_missing_key(self):
+        """Test handling missing state key."""
         # Arrange
-        set_session(sample_session)
+        mock_context = MockToolContext()
 
         # Act
-        result = get_state("missing_key")
+        result = get_state_tool("missing_key", mock_context)
 
         # Assert
         assert result["status"] == "error"
         assert "not found" in result["message"]
 
-    def test_get_state_handles_none_session(self):
-        """Test that get_state handles None session gracefully."""
-        # Arrange
-        set_session(None)
-
+    def test_handles_no_context(self):
+        """Test handling no tool context."""
         # Act
-        result = get_state("any_key")
+        result = get_state_tool("test_key", None)
 
         # Assert
         assert result["status"] == "error"
+        assert "No tool context available" in result["message"]
 
 
-class TestPotatoDetectionLogic:
-    """Test the potato detection functionality."""
+class TestCheckForPotato:
+    """Test the check_for_potato function."""
 
-    def test_finds_potato_in_user_prompt(self, sample_session):
+    def test_finds_potato_in_user_prompt(self):
         """Test detecting 'potato' in user prompt."""
         # Arrange
-        set_session(sample_session)
-        sample_session.state[STATE_USER_PROMPT] = "I really like potato chips"
+        mock_context = MockToolContext()
+        mock_context.state[STATE_USER_PROMPT] = "I really like potato chips"
 
         # Act
-        result = check_for_potato()
+        result = check_for_potato(mock_context)
 
         # Assert
         assert result["has_potato"] is True
         assert result["needs_clarification"] is False
+        assert mock_context.state[STATE_NEEDS_CLARIFICATION] is False
 
-    def test_finds_potato_case_insensitive(self, sample_session):
+    def test_finds_potato_case_insensitive(self):
         """Test detecting 'potato' regardless of case."""
         # Arrange
-        set_session(sample_session)
-        sample_session.state[STATE_USER_PROMPT] = "I love POTATO salad"
+        mock_context = MockToolContext()
+        mock_context.state[STATE_USER_PROMPT] = "I love POTATO salad"
 
         # Act
-        result = check_for_potato()
+        result = check_for_potato(mock_context)
 
         # Assert
         assert result["has_potato"] is True
 
-    def test_detects_missing_potato(self, sample_session):
+    def test_detects_missing_potato(self):
         """Test identifying when 'potato' is missing."""
         # Arrange
-        set_session(sample_session)
-        sample_session.state[STATE_USER_PROMPT] = "I like vegetables and fruits"
+        mock_context = MockToolContext()
+        mock_context.state[STATE_USER_PROMPT] = "I like vegetables and fruits"
 
         # Act
-        result = check_for_potato()
+        result = check_for_potato(mock_context)
 
         # Assert
         assert result["has_potato"] is False
         assert result["needs_clarification"] is True
+        assert mock_context.state[STATE_NEEDS_CLARIFICATION] is True
 
-    def test_finds_potato_in_clarification_string(self, sample_session):
+    def test_finds_potato_in_clarification_string(self):
         """Test detecting 'potato' in string clarification."""
         # Arrange
-        set_session(sample_session)
-        sample_session.state[STATE_USER_PROMPT] = "I like vegetables"
-        sample_session.state[STATE_CLARIFICATION] = "Actually, I prefer potato dishes"
+        mock_context = MockToolContext()
+        mock_context.state[STATE_USER_PROMPT] = "I like vegetables"
+        mock_context.state[STATE_CLARIFICATION] = "Actually, I prefer potato dishes"
 
         # Act
-        result = check_for_potato()
+        result = check_for_potato(mock_context)
 
         # Assert
         assert result["has_potato"] is True
 
-    def test_finds_potato_in_clarification_list(self, sample_session):
+    def test_finds_potato_in_clarification_list(self):
         """Test detecting 'potato' in list clarification."""
         # Arrange
-        set_session(sample_session)
-        sample_session.state[STATE_USER_PROMPT] = "I like vegetables"
-        sample_session.state[STATE_CLARIFICATION] = ["carrots", "potato soup", "broccoli"]
+        mock_context = MockToolContext()
+        mock_context.state[STATE_USER_PROMPT] = "I like vegetables"
+        mock_context.state[STATE_CLARIFICATION] = ["carrots", "potato soup", "broccoli"]
 
         # Act
-        result = check_for_potato()
+        result = check_for_potato(mock_context)
 
         # Assert
         assert result["has_potato"] is True
 
-    def test_handles_empty_clarification_list(self, sample_session):
+    def test_handles_empty_clarification_list(self):
         """Test handling empty clarification list."""
         # Arrange
-        set_session(sample_session)
-        sample_session.state[STATE_USER_PROMPT] = "I like vegetables"
-        sample_session.state[STATE_CLARIFICATION] = []
+        mock_context = MockToolContext()
+        mock_context.state[STATE_USER_PROMPT] = "I like vegetables"
+        mock_context.state[STATE_CLARIFICATION] = []
 
         # Act
-        result = check_for_potato()
+        result = check_for_potato(mock_context)
 
         # Assert
         assert result["has_potato"] is False
 
-    def test_handles_mixed_clarification_types(self, sample_session):
+    def test_handles_mixed_clarification_types(self):
         """Test handling non-string items in clarification."""
         # Arrange
-        set_session(sample_session)
-        sample_session.state[STATE_USER_PROMPT] = "I like vegetables"
-        sample_session.state[STATE_CLARIFICATION] = [123, {"text": "potato is great"}, None]
+        mock_context = MockToolContext()
+        mock_context.state[STATE_USER_PROMPT] = "I like vegetables"
+        mock_context.state[STATE_CLARIFICATION] = [123, {"text": "potato is great"}, None]
 
         # Act
-        result = check_for_potato()
+        result = check_for_potato(mock_context)
 
         # Assert
         assert result["has_potato"] is True
 
-    def test_handles_missing_state_keys(self, sample_session):
+    def test_handles_missing_state_keys(self):
         """Test handling missing state keys."""
         # Arrange
-        set_session(sample_session)
+        mock_context = MockToolContext()
 
         # Act
-        result = check_for_potato()
+        result = check_for_potato(mock_context)
 
         # Assert
         assert result["has_potato"] is False
 
-
-class TestClarifierGenerator:
-    """Test human input tool."""
-
-    def test_has_correct_name(self):
-        """Test tool name."""
+    def test_handles_no_context(self):
+        """Test handling no tool context."""
         # Act
-        clarifier = ClarifierGenerator()
+        result = check_for_potato(None)
 
         # Assert
-        assert clarifier.__name__ == "clarify_questions_tool"
+        assert "error" in result
+        assert "No tool context available" in result["error"]
+
+
+class TestClarifyQuestionsTool:
+    """Test the clarify_questions_tool_func function."""
 
     @mock.patch("builtins.input", return_value="Yes, potato!")
     def test_returns_user_input(self, mock_input):
         """Test returning user input."""
-        # Arrange
-        clarifier = ClarifierGenerator()
-
         # Act
-        result = clarifier()
+        result = clarify_questions_tool_func()
 
         # Assert
         assert result == {"reply": "Yes, potato!"}
@@ -272,18 +253,15 @@ class TestClarifierGenerator:
     @mock.patch("builtins.input", return_value="")
     def test_handles_empty_input(self, mock_input):
         """Test handling empty input."""
-        # Arrange
-        clarifier = ClarifierGenerator()
-
         # Act
-        result = clarifier()
+        result = clarify_questions_tool_func()
 
         # Assert
         assert result == {"reply": ""}
 
 
 class TestRedirectAndExit:
-    """Test redirect function."""
+    """Test the redirect_and_exit function."""
 
     def test_sets_escalate_flag(self):
         """Test setting escalate flag."""
@@ -312,7 +290,7 @@ class TestRedirectAndExit:
 
 
 class TestCreateRateLimitedAgent:
-    """Test agent creation."""
+    """Test the create_rate_limited_agent function."""
 
     @mock.patch("potato_decison_with_human_in_the_loop.agent.LlmAgent")
     def test_creates_agent_with_minimal_params(self, mock_llm_agent):
@@ -341,64 +319,3 @@ class TestCreateRateLimitedAgent:
         call_args = mock_llm_agent.call_args.kwargs
         assert call_args["tools"] == tools
         assert call_args["sub_agents"] == sub_agents
-
-
-class TestModuleConstants:
-    """Test module constants."""
-
-    def test_state_constants(self):
-        """Test state constants are correct."""
-        # Assert
-        assert STATE_USER_PROMPT == "user_prompt"
-        assert STATE_CLARIFICATION == "clarification"
-        assert STATE_NEEDS_CLARIFICATION == "needs_clarification"
-
-    def test_app_constants(self):
-        """Test app constants are correct."""
-        # Assert
-        assert APP_NAME == "test_poc_agent"
-        assert USER_ID == "demo_user"
-        assert GEMINI_MODEL == "gemini-2.5-flash-preview-04-17"
-
-
-class TestModuleIntegration:
-    """Test complete workflows."""
-
-    def test_complete_workflow_with_potato_in_prompt(self, sample_session):
-        """Test workflow when potato is found in prompt."""
-        # Arrange
-        set_session(sample_session)
-
-        # Act
-        set_state(STATE_USER_PROMPT, "I want potato dishes")
-        result = check_for_potato()
-
-        # Assert
-        assert sample_session.state[STATE_USER_PROMPT] == "I want potato dishes"
-        assert result["has_potato"] is True
-
-    def test_complete_workflow_with_potato_in_clarification(self, sample_session):
-        """Test workflow when potato is found in clarification."""
-        # Arrange
-        set_session(sample_session)
-
-        # Act
-        set_state(STATE_USER_PROMPT, "I like cooking")
-        set_state(STATE_CLARIFICATION, "Especially potato recipes")
-        result = check_for_potato()
-
-        # Assert
-        assert result["has_potato"] is True
-
-    def test_state_persistence(self, sample_session):
-        """Test state persists across operations."""
-        # Arrange
-        set_session(sample_session)
-
-        # Act
-        set_state("key1", "value1")
-        set_state("key2", "value2")
-
-        # Assert
-        assert get_state("key1")["value"] == "value1"
-        assert get_state("key2")["value"] == "value2"

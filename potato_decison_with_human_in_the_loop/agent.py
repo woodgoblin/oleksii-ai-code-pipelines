@@ -4,9 +4,7 @@ This agent demonstrates a simple decision loop that requires human clarification
 to proceed. The agent asks the user to include 'potato' in their response to continue.
 """
 
-import re
-import time
-from typing import Any, Dict, Optional
+from typing import Optional
 
 from google.adk.agents import LlmAgent, LoopAgent, SequentialAgent
 from google.adk.tools import FunctionTool, ToolContext
