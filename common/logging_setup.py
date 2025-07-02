@@ -48,6 +48,14 @@ class LoggerWriter:
     def flush(self):
         pass
 
+    def isatty(self):
+        """Return False since we're not a terminal. Required for Uvicorn compatibility."""
+        return False
+
+    def fileno(self):
+        """Return a fake file descriptor. Required for some logging libraries."""
+        return -1
+
 
 def setup_logging(
     app_name="application",

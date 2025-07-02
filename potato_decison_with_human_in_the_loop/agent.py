@@ -4,26 +4,16 @@ This agent demonstrates a simple decision loop that requires human clarification
 to proceed. The agent asks the user to include 'potato' in their response to continue.
 """
 
-import re
-import time
+from typing import Optional
 
 from google.adk.agents import LlmAgent, LoopAgent, SequentialAgent
-from google.adk.sessions import InMemorySessionService
 from google.adk.tools import FunctionTool, ToolContext
 
 from common.logging_setup import logger
 
 # Import from common modules
 from common.rate_limiting import RateLimiter, create_rate_limit_callbacks
-
-# Session setup
-APP_NAME = "test_poc_agent"
-USER_ID = "demo_user"
-SESSION_ID = "demo_session"
-
-# Create session service and session
-session_service = InMemorySessionService()
-_session = session_service.create_session(app_name=APP_NAME, user_id=USER_ID, session_id=SESSION_ID)
+from common.retry_runner import create_enhanced_runner
 
 # Define state keys
 STATE_USER_PROMPT = "user_prompt"
@@ -34,14 +24,6 @@ STATE_FINAL_SUMMARY = "final_summary"
 
 # Use a modern Gemini model
 GEMINI_MODEL = "gemini-2.5-flash-preview-04-17"
-
-
-# Global session manager for the demo
-def set_session(session):
-    """Set the global session for this agent module."""
-    global _session
-    _session = session
-
 
 # Create rate limiter and callbacks
 rate_limiter = RateLimiter(logger_instance=logger)
@@ -70,30 +52,35 @@ def create_rate_limited_agent(
 # --- Tools ---
 
 
-def set_state(key: str, value: str) -> dict:
-    """Utility function for agents to set values in the session state."""
-    global _session
-    if _session:
-        _session.state[key] = value
-        logger.info(f"Set state: {key} = {value}")
-    return {"status": "success", "message": f"Stored value in state key '{key}'", "key": key}
+def set_state_tool(key: str, value: str, tool_context: Optional[ToolContext] = None) -> dict:
+    """Tool for setting state values."""
+    if tool_context and hasattr(tool_context, "state"):
+        tool_context.state[key] = value
+        logger.info(f"Potato decision state updated: {key}")
+        return {"status": "success", "message": f"Stored value in state key '{key}'", "key": key}
+
+    logger.error("No tool context available for state setting")
+    return {"status": "error", "message": "No tool context available"}
 
 
-def get_state(key: str) -> dict:
-    """Utility function for agents to get values from the session state."""
-    global _session
-    if _session and key in _session.state:
-        value = _session.state[key]
-        return {"status": "success", "value": value, "key": key}
-    return {"status": "error", "message": f"Key '{key}' not found in state"}
+def get_state_tool(key: str, tool_context: Optional[ToolContext] = None) -> dict:
+    """Tool for getting state values."""
+    if tool_context and hasattr(tool_context, "state"):
+        value = tool_context.state.get(key)
+        if value is not None:
+            return {"status": "success", "value": str(value), "key": key}
+        return {"status": "error", "message": f"Key '{key}' not found in state"}
+
+    return {"status": "error", "message": "No tool context available"}
 
 
-def check_for_potato() -> dict:
+def check_for_potato(tool_context: Optional[ToolContext] = None) -> dict:
     """Check if 'potato' is in the user prompt or any stored clarification."""
-    global _session
+    if not tool_context or not hasattr(tool_context, "state"):
+        return {"error": "No tool context available"}
 
-    user_prompt = _session.state.get(STATE_USER_PROMPT, "").lower()
-    clarifications_state = _session.state.get(STATE_CLARIFICATION, None)
+    user_prompt = tool_context.state.get(STATE_USER_PROMPT, "").lower()
+    clarifications_state = tool_context.state.get(STATE_CLARIFICATION, None)
 
     # Check prompt first
     has_potato_in_prompt = "potato" in user_prompt
@@ -111,26 +98,25 @@ def check_for_potato() -> dict:
     has_potato = has_potato_in_prompt or has_potato_in_clarifications
 
     # Set the needs_clarification state
-    _session.state[STATE_NEEDS_CLARIFICATION] = not has_potato
+    tool_context.state[STATE_NEEDS_CLARIFICATION] = not has_potato
 
     return {"has_potato": has_potato, "needs_clarification": not has_potato}
 
 
-class ClarifierGenerator:
-    """Synchronous function to get console input for clarification."""
-
-    __name__ = "clarify_questions_tool"
-
-    def __call__(self):
-        print("--- CONSOLE INPUT REQUIRED ---")
-        prompt_message = "Could you please include the word 'potato' in your clarification? This is required to proceed: "
-        human_reply = input(prompt_message)
-        print("--- CONSOLE INPUT RECEIVED ---")
-        return {"reply": human_reply}
+def clarify_questions_tool_func(tool_context: Optional[ToolContext] = None) -> dict:
+    """Get clarification from the user via console input."""
+    print("--- CONSOLE INPUT REQUIRED ---")
+    prompt_message = "Could you please include the word 'potato' in your clarification? This is required to proceed: "
+    human_reply = input(prompt_message)
+    print("--- CONSOLE INPUT RECEIVED ---")
+    return {"reply": human_reply}
 
 
-# Change to standard FunctionTool wrapping the console-input function
-clarify_questions_tool = FunctionTool(func=ClarifierGenerator())
+# Set the function name for proper tool registration
+clarify_questions_tool_func.__name__ = "clarify_questions_tool"
+
+# Create the FunctionTool
+clarify_questions_tool = FunctionTool(func=clarify_questions_tool_func)
 
 
 def redirect_and_exit(tool_context: ToolContext) -> dict:
@@ -155,7 +141,7 @@ initial_agent = create_rate_limited_agent(
     If 'potato' is found, indicate that no clarification is needed.
     If 'potato' is not found, indicate that clarification will be needed.
     """,
-    tools=[FunctionTool(func=set_state), FunctionTool(func=check_for_potato)],
+    tools=[FunctionTool(func=set_state_tool), FunctionTool(func=check_for_potato)],
     output_key=STATE_TEST_VARIABLE,
 )
 
@@ -174,7 +160,7 @@ clarification_agent = create_rate_limited_agent(
     """,
     tools=[
         clarify_questions_tool,
-        FunctionTool(func=set_state),
+        FunctionTool(func=set_state_tool),
         FunctionTool(func=check_for_potato),
     ],
 )
@@ -191,7 +177,7 @@ decision_agent = create_rate_limited_agent(
     
     Only call redirect_and_exit when the clarification process is complete.
     """,
-    tools=[FunctionTool(func=get_state), FunctionTool(func=redirect_and_exit)],
+    tools=[FunctionTool(func=get_state_tool), FunctionTool(func=redirect_and_exit)],
 )
 
 # Finalizer Agent - provides the final response
@@ -208,7 +194,7 @@ finalizer_agent = create_rate_limited_agent(
     
     Be friendly and summarize the interaction.
     """,
-    tools=[FunctionTool(func=get_state)],
+    tools=[FunctionTool(func=get_state_tool)],
 )
 
 # Create the loop agent that will repeatedly run until 'potato' is found
@@ -220,3 +206,19 @@ potato_loop = LoopAgent(
 
 # Main sequential agent that runs the loop then the finalizer
 root_agent = SequentialAgent(name="PotatoDecisionAgent", sub_agents=[potato_loop, finalizer_agent])
+
+
+def create_enhanced_potato_runner(session_service):
+    """Create an enhanced runner with retry logic for the potato decision agent.
+
+    This wraps the entire agent execution with retry logic that can catch
+    Google AI ClientError exceptions and retry them with proper delays.
+    """
+    return create_enhanced_runner(
+        agent=root_agent,
+        app_name="PotatoDecisionWithRetry",
+        session_service=session_service,
+        max_retries=3,
+        base_delay=2.0,
+        logger_instance=logger,
+    )

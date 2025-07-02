@@ -1,6 +1,7 @@
 """Tools for Cursor Prompt Preprocessor - MCP compatible agent tools."""
 
 import datetime
+import fnmatch
 import glob
 import json
 import os
@@ -327,7 +328,7 @@ def search_codebase(
             ]
 
             for filename in files:
-                if not glob.fnmatch.fnmatch(filename, file_pattern):
+                if not fnmatch.fnmatch(filename, file_pattern):
                     continue
 
                 file_path = os.path.join(root, filename)
@@ -445,13 +446,18 @@ def set_session_state(
     return {"status": "warning", "message": f"No context available for key '{key}'"}
 
 
-def get_session_state(
-    key: str, default: Optional[Any] = None, tool_context: ToolContext | None = None
-) -> Any:
+def get_session_state(key: str, default_value=None, tool_context: ToolContext | None = None):
     """Retrieve value from session state."""
     if tool_context and hasattr(tool_context, "state"):
-        return tool_context.state.get(key, default)
-    return default
+        value = tool_context.state.get(key, default_value)
+        # For ADK compatibility, convert complex objects to JSON strings
+        if isinstance(value, (dict, list)):
+            try:
+                return json.dumps(value)
+            except (TypeError, ValueError):
+                return str(value)
+        return value
+    return default_value
 
 
 def get_target_directory_from_state(tool_context: ToolContext | None = None) -> str:
