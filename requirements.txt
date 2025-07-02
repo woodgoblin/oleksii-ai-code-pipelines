@@ -8,3 +8,6 @@ mypy>=1.16.1
 google-genai>=1.23.0
 mcp[cli]>=1.10.1
 gitignore-parser>=0.1.12
+uvicorn>=0.27.0
+starlette>=0.32.0
+fastapi>=0.104.0

@@ -1,6 +1,7 @@
 """Tools for Cursor Prompt Preprocessor - MCP compatible agent tools."""
 
 import datetime
+import fnmatch
 import glob
 import json
 import os
@@ -327,7 +328,7 @@ def search_codebase(
             ]
 
             for filename in files:
-                if not glob.fnmatch.fnmatch(filename, file_pattern):
+                if not fnmatch.fnmatch(filename, file_pattern):
                     continue
 
                 file_path = os.path.join(root, filename)
@@ -446,12 +447,20 @@ def set_session_state(
 
 
 def get_session_state(
-    key: str, default: Optional[Any] = None, tool_context: ToolContext | None = None
-) -> Any:
-    """Retrieve value from session state."""
+    key: str, default_value: str = "", tool_context: ToolContext | None = None
+) -> str:
+    """Retrieve value from session state as JSON string."""
     if tool_context and hasattr(tool_context, "state"):
-        return tool_context.state.get(key, default)
-    return default
+        value = tool_context.state.get(key, default_value)
+        # Return JSON string representation for consistency
+        if isinstance(value, str):
+            return value
+        else:
+            try:
+                return json.dumps(value) if value is not None else default_value
+            except (TypeError, ValueError):
+                return str(value) if value is not None else default_value
+    return default_value
 
 
 def get_target_directory_from_state(tool_context: ToolContext | None = None) -> str:

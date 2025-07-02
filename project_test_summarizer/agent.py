@@ -90,6 +90,7 @@ save_analysis_report_tool = FunctionTool(func=save_analysis_report)
 read_file_content_tool = FunctionTool(func=read_file_content)
 list_directory_contents_tool = FunctionTool(func=list_directory_contents)
 search_codebase_tool = FunctionTool(func=search_codebase)
+get_session_state_tool = FunctionTool(func=get_session_state)
 set_session_state_tool = FunctionTool(func=set_session_state)
 
 # --- LLM Agents ---
@@ -162,7 +163,7 @@ test_extraction_agent = create_rate_limited_agent(
     - Confidence level in the extraction
     - Notes about parameterization or variations
     """,
-    tools=[set_session_state_tool],
+    tools=[get_session_state_tool, set_session_state_tool],
     output_key=STATE_EXTRACTED_TESTS,
 )
 
@@ -182,9 +183,10 @@ test_analysis_agent = create_rate_limited_agent(
        - If not found exactly, try variations and similar names
     
     2. **Analyze consistency**:
-       - Compare the test name from reports with the actual function/method name in code
+       - From the test code, determine the actual function/method name in code under test. Search it in the codebase using search_codebase tool.
+       - Compare the test name from reports with the actual function/method name in code under test (NOT IN THE TEST CODE)
        - Check if display name (docstring/@DisplayName) matches the test purpose
-       - Flag any inconsistencies between report name and code implementation
+       - IMPORTANT: Flag any inconsistencies between report name and code implementation
     
     3. **Evaluate test meaningfulness**:
        - Check if the test has meaningful assertions (not just testing the framework)
@@ -194,8 +196,8 @@ test_analysis_agent = create_rate_limited_agent(
     
     4. **Assess naming clarity**:
        - Evaluate if the test name accurately describes what the test does
-       - Check if the name follows good naming conventions
-       - Suggest improvements for unclear or misleading names
+       - Check if the name follows good naming conventions 
+       - Suggest improvements for unclear or misleading names (If the name is given as a human readable sentence don't suggest snake_case or camelCase. However you can suggest better human readable names)
     
     Store comprehensive analysis results in session state key '{STATE_TEST_ANALYSIS}'.
     
@@ -208,6 +210,7 @@ test_analysis_agent = create_rate_limited_agent(
     - Better test name suggestions (if applicable)
     """,
     tools=[
+        get_session_state_tool,
         search_test_by_name_tool,
         read_file_content_tool,
         search_codebase_tool,
@@ -253,7 +256,7 @@ human_report_agent = create_rate_limited_agent(
     Format as a JSON structure that is human-readable but also structured.
     Store in session state key '{STATE_HUMAN_REPORT}'.
     """,
-    tools=[set_session_state_tool],
+    tools=[get_session_state_tool, set_session_state_tool],
     output_key=STATE_HUMAN_REPORT,
 )
 
@@ -298,7 +301,7 @@ ai_report_agent = create_rate_limited_agent(
     Format as a JSON structure optimized for programmatic consumption.
     Store in session state key '{STATE_AI_REPORT}'.
     """,
-    tools=[set_session_state_tool],
+    tools=[get_session_state_tool, set_session_state_tool],
     output_key=STATE_AI_REPORT,
 )
 
@@ -310,7 +313,7 @@ project_summary_agent = create_rate_limited_agent(
     You are a Project Test Summarizer.
     Your task is to create high-level summaries of the project's testing landscape.
     
-    Using data from all previous analysis stages, create three different summary formats:
+    Using data from all previous analysis stages, especially the {STATE_TEST_ANALYSIS}, create three different summary formats:
     
     **3-Sentence Summary**:
     A concise overview of testing state, major frameworks used, and overall quality.
@@ -330,7 +333,7 @@ project_summary_agent = create_rate_limited_agent(
     
     Store all three summaries in session state key '{STATE_PROJECT_SUMMARY}'.
     """,
-    tools=[set_session_state_tool],
+    tools=[get_session_state_tool, set_session_state_tool],
     output_key=STATE_PROJECT_SUMMARY,
 )
 
@@ -359,7 +362,7 @@ report_export_agent = create_rate_limited_agent(
     
     The exported report should be a complete record of the entire test analysis process.
     """,
-    tools=[save_analysis_report_tool],
+    tools=[get_session_state_tool, save_analysis_report_tool],
 )
 
 # --- Agent Pipeline Construction ---

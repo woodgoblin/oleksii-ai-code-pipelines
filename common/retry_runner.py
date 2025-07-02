@@ -134,7 +134,7 @@ def create_enhanced_runner(
     Returns:
         Enhanced Runner instance with retry capabilities
     """
-    from google.adk.runner import Runner
+    from google.adk import Runner
 
     # Create the original runner
     original_runner = Runner(agent=agent, app_name=app_name, session_service=session_service)
@@ -148,12 +148,29 @@ def create_enhanced_runner(
             self._base_delay = base_delay
             self._logger = logger_instance
 
-        async def run_async(self, user_id: str, session_id: str, message: str):
+        async def run_async(self, user_id: str, session_id: str, message: str, run_config=None):
             """Run with retry logic for LLM errors."""
+
+            # Convert string message to Content object
+            from google.adk.agents.run_config import RunConfig
+            from google.genai import types
+
+            if isinstance(message, str):
+                content = types.Content(role="user", parts=[types.Part(text=message)])
+            else:
+                content = message
+
+            if run_config is None:
+                run_config = RunConfig()
 
             async def _collect_events():
                 events = []
-                async for event in self._original_runner.run_async(user_id, session_id, message):
+                async for event in self._original_runner.run_async(
+                    user_id=user_id,
+                    session_id=session_id,
+                    new_message=content,
+                    run_config=run_config,
+                ):
                     events.append(event)
                 return events
 

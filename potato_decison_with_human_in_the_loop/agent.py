@@ -15,6 +15,7 @@ from common.logging_setup import logger
 
 # Import from common modules
 from common.rate_limiting import RateLimiter, create_rate_limit_callbacks
+from common.retry_runner import create_enhanced_runner
 
 # Define state keys
 STATE_USER_PROMPT = "user_prompt"
@@ -52,13 +53,14 @@ def create_rate_limited_agent(
 
 # --- Tools ---
 
+
 def set_state_tool(key: str, value: str, tool_context: Optional[ToolContext] = None) -> dict:
     """Tool for setting state values."""
     if tool_context and hasattr(tool_context, "state"):
         tool_context.state[key] = value
         logger.info(f"Potato decision state updated: {key}")
         return {"status": "success", "message": f"Stored value in state key '{key}'", "key": key}
-    
+
     logger.error("No tool context available for state setting")
     return {"status": "error", "message": "No tool context available"}
 
@@ -70,7 +72,7 @@ def get_state_tool(key: str, tool_context: Optional[ToolContext] = None) -> dict
         if value is not None:
             return {"status": "success", "value": str(value), "key": key}
         return {"status": "error", "message": f"Key '{key}' not found in state"}
-    
+
     return {"status": "error", "message": "No tool context available"}
 
 
@@ -78,7 +80,7 @@ def check_for_potato(tool_context: Optional[ToolContext] = None) -> dict:
     """Check if 'potato' is in the user prompt or any stored clarification."""
     if not tool_context or not hasattr(tool_context, "state"):
         return {"error": "No tool context available"}
-    
+
     user_prompt = tool_context.state.get(STATE_USER_PROMPT, "").lower()
     clarifications_state = tool_context.state.get(STATE_CLARIFICATION, None)
 
@@ -206,3 +208,19 @@ potato_loop = LoopAgent(
 
 # Main sequential agent that runs the loop then the finalizer
 root_agent = SequentialAgent(name="PotatoDecisionAgent", sub_agents=[potato_loop, finalizer_agent])
+
+
+def create_enhanced_potato_runner(session_service):
+    """Create an enhanced runner with retry logic for the potato decision agent.
+
+    This wraps the entire agent execution with retry logic that can catch
+    Google AI ClientError exceptions and retry them with proper delays.
+    """
+    return create_enhanced_runner(
+        agent=root_agent,
+        app_name="PotatoDecisionWithRetry",
+        session_service=session_service,
+        max_retries=3,
+        base_delay=2.0,
+        logger_instance=logger,
+    )
