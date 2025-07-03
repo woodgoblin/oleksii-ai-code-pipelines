@@ -310,7 +310,7 @@ class TestSessionStateManagement:
         # Arrange
         key = "test_key"
         stored_value = "stored_value"
-        default_value = "default_value" if default_provided else None
+        default_value = "default_value" if default_provided else ""
 
         mock_context = Mock() if context_available else None
         if mock_context:

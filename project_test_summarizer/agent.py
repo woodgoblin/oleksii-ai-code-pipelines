@@ -12,10 +12,14 @@ from common.logging_setup import setup_logging
 from common.rate_limiting import RateLimiter, create_rate_limit_callbacks
 from common.tools import (
     get_session_state,
+    get_session_state_direct,
+    get_structured_state,
     list_directory_contents,
     read_file_content,
     search_codebase,
     set_session_state,
+    set_session_state_direct,
+    set_structured_state,
 )
 
 # Import from our modules
@@ -93,6 +97,12 @@ search_codebase_tool = FunctionTool(func=search_codebase)
 get_session_state_tool = FunctionTool(func=get_session_state)
 set_session_state_tool = FunctionTool(func=set_session_state)
 
+# Improved session state tools for structured data
+get_structured_state_tool = FunctionTool(func=get_structured_state)
+set_structured_state_tool = FunctionTool(func=set_structured_state)
+get_session_state_direct_tool = FunctionTool(func=get_session_state_direct)
+set_session_state_direct_tool = FunctionTool(func=set_session_state_direct)
+
 # --- LLM Agents ---
 
 # Test Report Discovery Agent
@@ -104,33 +114,39 @@ test_report_discovery_agent = create_rate_limited_agent(
     Your task is to discover and analyze test reports in the target project directory.
     
     Your workflow:
-    1. Use the discover_test_reports tool to find test report files in the project
-    2. **IMPORTANT**: If you find many report files (10+), use analyze_multiple_test_reports with the list of file paths for efficient batch processing
-    3. If you find only a few report files (<10), you may use analyze_test_report_content for individual files
-    4. Use LLM analysis to identify the testing framework being used based on the report format and content
-    5. Store the combined results in session state key '{STATE_TEST_REPORTS}'
+    1. Get the target project directory from session state key '{STATE_TARGET_PROJECT}' using get_structured_state
+    2. Use the discover_test_reports tool to find test report files in the project
+    3. **IMPORTANT**: If you find many report files (10+), use analyze_multiple_test_reports with the list of absolute file paths for efficient batch processing
+    4. If you find only a few report files (<10), you may use analyze_test_report_content for individual files
+    5. **CRITICAL**: Store the COMPLETE STRUCTURED DATA as JSON string in session state key '{STATE_TEST_REPORTS}' using set_structured_state
+    
+    **Data Storage Guidelines**:
+    - Convert the tool output to JSON string before storing with set_structured_state
+    - Include both discovered_reports and extracted_tests data
+    - Do NOT create human-readable summaries - store the complete tool output as JSON
+    - The next agent needs the structured test data to extract test names
     
     **Batch Processing Guidelines**:
     - For 10+ reports: Use analyze_multiple_test_reports with a list of absolute file paths
     - This avoids making 100+ individual tool calls and is much more efficient
     - The batch tool returns aggregated results with deduplication and summary statistics
     
-    You should identify:
-    - Testing framework(s) used (pytest, JUnit, Jest, etc.)
-    - Report formats found (XML, JSON, HTML)
-    - Total number of tests found across all reports
-    - Any inconsistencies between different report formats
-    - Processing efficiency (how many reports were processed successfully)
-    
-    Format your findings as a structured summary that includes both the raw discovery data
-    and your intelligent analysis of what testing frameworks and practices are in use.
+    **JSON Storage Format**:
+    Use set_structured_state to store a JSON string like:
+    {{
+        "discovery_result": {{discovered reports data}},
+        "analysis_result": {{extracted tests data}},
+        "framework_detected": "detected framework name",
+        "summary": "brief summary for logging"
+    }}
     """,
     tools=[
+        get_structured_state_tool,
         discover_test_reports_tool,
         analyze_test_report_content_tool,
         analyze_multiple_test_reports_tool,
         list_directory_contents_tool,
-        set_session_state_tool,
+        set_structured_state_tool,
     ],
     output_key=STATE_TEST_REPORTS,
 )
@@ -144,26 +160,47 @@ test_extraction_agent = create_rate_limited_agent(
     Your task is to extract and consolidate all unique test names from the discovered test reports.
     
     Your workflow:
-    1. Retrieve the test reports data from session state key '{STATE_TEST_REPORTS}'
-    2. Extract all unique test names from all discovered reports
-    3. Use LLM analysis to clean and normalize test names (handle duplicates, variations)
-    4. Identify likely parameterized tests (tests with similar names but different parameters)
-    5. Store the extracted test list in session state key '{STATE_EXTRACTED_TESTS}'
+    1. Retrieve the test reports data from session state key '{STATE_TEST_REPORTS}' using get_structured_state
+    2. **IMPORTANT**: Parse the JSON string returned - look for 'analysis_result' containing extracted_tests or unique_tests
+    3. Extract all unique test names from the structured test data
+    4. Clean and normalize test names (handle duplicates, variations)
+    5. Identify likely parameterized tests (tests with similar names but different parameters)
+    6. Store the extracted test list as JSON string in session state key '{STATE_EXTRACTED_TESTS}' using set_structured_state
     
-    You should:
-    - Deduplicate test names intelligently
-    - Group likely parameterized test variants
-    - Identify test naming patterns and conventions
-    - Flag any unusual or suspicious test names
+    **JSON Data Parsing Guidelines**:
+    - Use get_structured_state to retrieve data as JSON string, then parse it
+    - The input data will be structured JSON with 'discovery_result' and 'analysis_result' keys
+    - Look for 'extracted_tests' or 'unique_tests' arrays in the analysis_result
+    - Each test should have properties like 'test_name', 'full_name', 'class_name', etc.
+    - Handle missing or malformed data gracefully
     
-    Output a structured list where each test has:
-    - Original name as found in reports
-    - Normalized/cleaned name
-    - Source report file(s)
-    - Confidence level in the extraction
-    - Notes about parameterization or variations
+    **Error Handling**:
+    - If structured data is missing, return an error message explaining what's needed
+    - If no tests are found, still store an empty but valid structure as JSON
+    - Log any parsing issues for debugging
+    
+    **JSON Storage Format**:
+    Use set_structured_state to store a JSON string like:
+    {{
+        "extracted_tests": [
+            {{
+                "original_name": "test name from report",
+                "normalized_name": "cleaned test name", 
+                "full_name": "class.method or full identifier",
+                "source_reports": ["file1.xml", "file2.xml"],
+                "test_type": "unit|integration|etc",
+                "confidence": "high|medium|low"
+            }}
+        ],
+        "extraction_summary": {{
+            "total_tests_found": 0,
+            "unique_tests_extracted": 0,
+            "frameworks_detected": [],
+            "parsing_issues": []
+        }}
+    }}
     """,
-    tools=[get_session_state_tool, set_session_state_tool],
+    tools=[get_structured_state_tool, set_structured_state_tool],
     output_key=STATE_EXTRACTED_TESTS,
 )
 
@@ -175,7 +212,14 @@ test_analysis_agent = create_rate_limited_agent(
     You are a Test Analysis Agent.
     Your task is to analyze each extracted test by finding it in the codebase and evaluating its quality.
     
-    For each test from session state key '{STATE_EXTRACTED_TESTS}', you must:
+    Your workflow:
+    1. Get the target project directory from session state key '{STATE_TARGET_PROJECT}' using get_structured_state
+    2. Retrieve extracted tests from session state key '{STATE_EXTRACTED_TESTS}' using get_structured_state
+    3. **IMPORTANT**: Parse the JSON string returned - look for 'extracted_tests' array
+    4. For each test, perform detailed analysis as described below
+    5. Store comprehensive results as JSON string in session state key '{STATE_TEST_ANALYSIS}' using set_structured_state
+    
+    **For each test, you must**:
     
     1. **Find the test in code**:
        - Use search_test_by_name with both exact and fuzzy matching
@@ -199,23 +243,48 @@ test_analysis_agent = create_rate_limited_agent(
        - Check if the name follows good naming conventions 
        - Suggest improvements for unclear or misleading names (If the name is given as a human readable sentence don't suggest snake_case or camelCase. However you can suggest better human readable names)
     
-    Store comprehensive analysis results in session state key '{STATE_TEST_ANALYSIS}'.
+    **Error Handling**:
+    - If extracted_tests data is missing or malformed, return detailed error information
+    - If no tests to analyze, return empty but valid structure as JSON
+    - Continue processing other tests if one fails
     
-    For each test, output:
-    - Test name and location found
-    - Consistency issues (if any)
-    - Meaningfulness assessment (does it test something real?)
-    - Naming clarity evaluation
-    - Specific suggestions for improvement
-    - Better test name suggestions (if applicable)
+    **JSON Storage Format**:
+    Use set_structured_state to store a JSON string like:
+    {{
+        "analyzed_tests": [
+            {{
+                "test_name": "original test name",
+                "test_location": {{
+                    "file_path": "path/to/test/file.py",
+                    "line_number": 123,
+                    "found": true
+                }},
+                "consistency_issues": ["list of issues"],
+                "meaningfulness_score": "high|medium|low", 
+                "meaningfulness_notes": "explanation of assessment",
+                "naming_clarity_score": "high|medium|low",
+                "naming_suggestions": ["suggested improvements"],
+                "code_under_test": "function/method being tested",
+                "issues_found": ["all problems identified"],
+                "recommendations": ["specific improvement suggestions"]
+            }}
+        ],
+        "analysis_summary": {{
+            "total_tests_analyzed": 0,
+            "tests_found_in_code": 0,
+            "critical_issues": 0,
+            "moderate_issues": 0,
+            "good_tests": 0
+        }}
+    }}
     """,
     tools=[
-        get_session_state_tool,
+        get_structured_state_tool,
         search_test_by_name_tool,
         read_file_content_tool,
         search_codebase_tool,
         discover_test_files_tool,
-        set_session_state_tool,
+        set_structured_state_tool,
     ],
     output_key=STATE_TEST_ANALYSIS,
 )
@@ -228,7 +297,7 @@ human_report_agent = create_rate_limited_agent(
     You are a Human-Friendly Report Generator.
     Your task is to create a comprehensive, readable report for human developers.
     
-    Using data from session state key '{STATE_TEST_ANALYSIS}', create a report with:
+    Using data from session state key '{STATE_TEST_ANALYSIS}' (retrieved with get_structured_state and parsed as JSON), create a report with:
     
     **Executive Summary**:
     - Total tests analyzed
@@ -254,9 +323,9 @@ human_report_agent = create_rate_limited_agent(
     - Framework-specific best practices
     
     Format as a JSON structure that is human-readable but also structured.
-    Store in session state key '{STATE_HUMAN_REPORT}'.
+    Store as JSON string in session state key '{STATE_HUMAN_REPORT}' using set_structured_state.
     """,
-    tools=[get_session_state_tool, set_session_state_tool],
+    tools=[get_structured_state_tool, set_structured_state_tool],
     output_key=STATE_HUMAN_REPORT,
 )
 
@@ -268,7 +337,7 @@ ai_report_agent = create_rate_limited_agent(
     You are an AI-Friendly Report Generator.
     Your task is to create a structured report optimized for AI-assisted coding tools.
     
-    Using data from session state key '{STATE_TEST_ANALYSIS}', create a report formatted as prompts for AI coding assistants.
+    Using data from session state key '{STATE_TEST_ANALYSIS}' (retrieved with get_structured_state and parsed as JSON), create a report formatted as prompts for AI coding assistants.
     
     For each test with issues, generate:
     
@@ -299,9 +368,9 @@ ai_report_agent = create_rate_limited_agent(
     - Include: [specific assertions needed]"
     
     Format as a JSON structure optimized for programmatic consumption.
-    Store in session state key '{STATE_AI_REPORT}'.
+    Store as JSON string in session state key '{STATE_AI_REPORT}' using set_structured_state.
     """,
-    tools=[get_session_state_tool, set_session_state_tool],
+    tools=[get_structured_state_tool, set_structured_state_tool],
     output_key=STATE_AI_REPORT,
 )
 
@@ -313,7 +382,7 @@ project_summary_agent = create_rate_limited_agent(
     You are a Project Test Summarizer.
     Your task is to create high-level summaries of the project's testing landscape.
     
-    Using data from all previous analysis stages, especially the {STATE_TEST_ANALYSIS}, create three different summary formats:
+    Using data from all previous analysis stages, especially the {STATE_TEST_ANALYSIS} (retrieved with get_structured_state and parsed as JSON), create three different summary formats:
     
     **3-Sentence Summary**:
     A concise overview of testing state, major frameworks used, and overall quality.
@@ -331,9 +400,9 @@ project_summary_agent = create_rate_limited_agent(
     - Specific recommendations for improvement
     - Suggested next steps for the development team
     
-    Store all three summaries in session state key '{STATE_PROJECT_SUMMARY}'.
+    Store all three summaries as JSON string in session state key '{STATE_PROJECT_SUMMARY}' using set_structured_state.
     """,
-    tools=[get_session_state_tool, set_session_state_tool],
+    tools=[get_structured_state_tool, set_structured_state_tool],
     output_key=STATE_PROJECT_SUMMARY,
 )
 
@@ -346,7 +415,7 @@ report_export_agent = create_rate_limited_agent(
     Your task is to compile all analysis results and export them to a JSON file.
     
     Your workflow:
-    1. Gather all results from session state:
+    1. Gather all results from session state using get_structured_state and parse JSON strings:
        - Test reports data from '{STATE_TEST_REPORTS}'
        - Extracted tests from '{STATE_EXTRACTED_TESTS}'
        - Analysis results from '{STATE_TEST_ANALYSIS}'
@@ -362,7 +431,7 @@ report_export_agent = create_rate_limited_agent(
     
     The exported report should be a complete record of the entire test analysis process.
     """,
-    tools=[get_session_state_tool, save_analysis_report_tool],
+    tools=[get_structured_state_tool, save_analysis_report_tool],
 )
 
 # --- Agent Pipeline Construction ---
@@ -400,7 +469,7 @@ root_agent = create_rate_limited_agent(
     
     **Your workflow**:
     1. Welcome the user and confirm the target project directory
-    2. Store the project path in session state key '{STATE_TARGET_PROJECT}'
+    2. Store the project path as JSON string in session state key '{STATE_TARGET_PROJECT}' using set_structured_state
     3. Transfer control to the AnalysisPipeline to perform comprehensive test analysis
     4. Present a final summary of findings and where the detailed report was saved
     
@@ -419,6 +488,6 @@ root_agent = create_rate_limited_agent(
     
     Keep your responses professional and focused on helping improve test quality.
     """,
-    tools=[set_session_state_tool, list_directory_contents_tool],
+    tools=[set_structured_state_tool, list_directory_contents_tool],
     sub_agents=[analysis_pipeline],
 )

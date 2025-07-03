@@ -4,7 +4,7 @@
 APP_NAME = "project_test_summarizer"
 USER_ID = "test_analyzer_user"
 SESSION_ID = "test_analysis_session"
-GEMINI_MODEL = "gemini-2.5-flash-preview-05-20"
+GEMINI_MODEL = "gemini-2.0-flash"
 
 # State keys for session state
 STATE_TARGET_PROJECT = "target_project_directory"
