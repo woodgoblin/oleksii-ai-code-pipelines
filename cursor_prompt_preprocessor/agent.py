@@ -298,6 +298,7 @@ user_answer_collection_agent = create_rate_limited_agent(
             The `set_state` call must use '{STATE_ANSWERS}' as the key.
             The value for `set_state` must be the existing list from '{STATE_ANSWERS}' (or a new list if none exists) with the new 'reply' appended to it. Ensure the value is a JSON string representing the list.
         d.  DO NOT make any other function calls. Your turn ends after the `set_state` call.
+        e.  After the `set_state` call, you MUST finish your turn and transfer control to the next agent.
 
     Strictly adhere to this logic. Do not deviate. Only call `clarify_questions_tool` and then `set_state` if questions exist. Otherwise, output the exact exit string and make NO function calls.
     """,

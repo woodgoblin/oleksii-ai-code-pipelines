@@ -446,10 +446,10 @@ def set_session_state(
     return {"status": "warning", "message": f"No context available for key '{key}'"}
 
 
-def get_session_state(key: str, default_value=None, tool_context: ToolContext | None = None):
+def get_session_state(key: str, default_value: str = "", tool_context: ToolContext | None = None):
     """Retrieve value from session state."""
     if tool_context and hasattr(tool_context, "state"):
-        value = tool_context.state.get(key, default_value)
+        value = tool_context.state.get(key, default_value if default_value else None)
         # For ADK compatibility, convert complex objects to JSON strings
         if isinstance(value, (dict, list)):
             try:
@@ -457,6 +457,88 @@ def get_session_state(key: str, default_value=None, tool_context: ToolContext | 
             except (TypeError, ValueError):
                 return str(value)
         return value
+    return default_value if default_value else None
+
+
+def set_session_state_direct(
+    key: str, value: str, tool_context: ToolContext | None = None
+) -> Dict[str, str]:
+    """Store any value directly in session state without JSON conversion.
+
+    Note: value should be a JSON string representation of the data to store.
+    """
+    try:
+        # Parse the JSON string to get the actual value
+        parsed_value = json.loads(value)
+    except json.JSONDecodeError:
+        # If it's not JSON, store as string
+        parsed_value = value
+
+    if tool_context and hasattr(tool_context, "state"):
+        tool_context.state[key] = parsed_value
+        logger.info(f"Direct state set for key '{key}' with type {type(parsed_value).__name__}")
+        return {"status": "success", "message": f"State set for key '{key}'"}
+
+    return {"status": "warning", "message": f"No context available for key '{key}'"}
+
+
+def get_session_state_direct(
+    key: str, default_value: str = "", tool_context: ToolContext | None = None
+):
+    """Retrieve value from session state without JSON conversion."""
+    if tool_context and hasattr(tool_context, "state"):
+        value = tool_context.state.get(key, default_value if default_value else None)
+        logger.debug(f"Direct state retrieved for key '{key}' with type {type(value).__name__}")
+        # Convert complex objects to JSON strings for ADK compatibility
+        if isinstance(value, (dict, list)):
+            try:
+                return json.dumps(value)
+            except (TypeError, ValueError):
+                return str(value)
+        return value if value is not None else default_value
+    return default_value
+
+
+def set_structured_state(
+    key: str, structured_data: str, tool_context: ToolContext | None = None
+) -> Dict[str, str]:
+    """Store structured data in session state, accepting JSON string input."""
+    try:
+        # Parse the JSON string to get the structured data
+        value = json.loads(structured_data)
+
+        if tool_context and hasattr(tool_context, "state"):
+            tool_context.state[key] = value
+            logger.info(
+                f"Structured state set for key '{key}' with {len(value) if isinstance(value, (dict, list)) else 'scalar'} items"
+            )
+            return {"status": "success", "message": f"Structured state set for key '{key}'"}
+
+        return {"status": "warning", "message": f"No context available for key '{key}'"}
+    except json.JSONDecodeError as e:
+        return {"status": "error", "message": f"Invalid JSON: {str(e)}"}
+    except Exception as e:
+        return {"status": "error", "message": f"Error storing structured data: {str(e)}"}
+
+
+def get_structured_state(
+    key: str, default_value: str = "", tool_context: ToolContext | None = None
+):
+    """Retrieve structured data from session state as JSON string."""
+    if tool_context and hasattr(tool_context, "state"):
+        value = tool_context.state.get(key)
+        if value is not None:
+            logger.debug(
+                f"Structured state retrieved for key '{key}' with type {type(value).__name__}"
+            )
+            # Convert to JSON string for ADK compatibility
+            if isinstance(value, (dict, list)):
+                try:
+                    return json.dumps(value)
+                except (TypeError, ValueError):
+                    return str(value)
+            return json.dumps(value) if value is not None else default_value
+        return default_value
     return default_value
 
 
