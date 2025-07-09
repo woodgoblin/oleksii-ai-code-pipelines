@@ -29,6 +29,7 @@ from cursor_prompt_preprocessor.config import (
     GEMINI_MODEL,
     NO_QUESTIONS,
     STATE_ANSWERS,
+    STATE_CONSOLIDATED_PROMPT,
     STATE_DEPENDENCIES,
     STATE_FILTERED_STRUCTURE,
     STATE_FINAL_CONTEXT,
@@ -257,26 +258,42 @@ question_asking_agent = create_rate_limited_agent(
     model=GEMINI_MODEL,
     instruction=f"""
     You are a Clarifying Question Generator.
-    Your task is to analyze the user's prompt from the state key '{STATE_USER_PROMPT}'
-    along with the project information gathered so far including your previous questions state key  {STATE_QUESTIONS} 
-    the state key '{STATE_ANSWERS}', and generate clarifying questions
-    when the prompt + clarifications are ambiguous or lacks necessary details.
+    Your task is to create a consolidated prompt and evaluate whether more clarifications are needed.
     
-    The questions should help pinpoint exactly what the user needs in terms of code implementation.
-    
-    If you think that the prompt doesn't make sense in the context of the project, explain why in your question (rules for them above)
-    The project might contain code that already satisfies, or partially satisfies the user's prompt.
-    If the user prompt is ambiguous or its assumptions contradict some of the project's information, explain why in your question and request clarification.
+    STEP 1: CREATE CONSOLIDATED PROMPT
+    - Retrieve the original user prompt from '{STATE_USER_PROMPT}'
+    - Retrieve existing answers from '{STATE_ANSWERS}' (if any)
+    - If this is the first iteration (no answers yet), the consolidated prompt is just the original prompt
+    - If answers exist, create a consolidated prompt by simple concatenation:
+      "Original prompt: [original_prompt]
 
-    Do the following, in order:
-    1. Identify unclear aspects or missing information in the prompt. 
-       Use the structure of the project to help you understand the user's prompt.
-       Use read_file_content() tool to clarify your doubts about the existing code before asking the user.
-    2. Formulate 1-3 specific, targeted questions to clarify these aspects
-    3. If you have questions to ask, respond with the questions you have.
-    4. If the prompt is completely clear and has sufficient information, respond EXACTLY with the string "{NO_QUESTIONS}"
+      Clarifications: [answer1], [answer2], ..."
+    - Store this consolidated prompt in '{STATE_CONSOLIDATED_PROMPT}' using the set_state tool
+    
+    STEP 2: EVALUATE CONSOLIDATED PROMPT FOR CLARITY
+    - Analyze the consolidated prompt along with the project information to determine if it's clear enough
+    - Use read_file_content() tool to clarify doubts about existing code before asking the user
+    
+    STEP 3: CHECK FOR GRACEFUL EXIT
+    - Check if we've reached max iterations (3) by examining the length of '{STATE_ANSWERS}' list
+    - If we have 3 or more answers already and still need clarification, implement graceful exit:
+      * For any remaining unclear aspects, provide your best assumption using format: "assumption: [likeliest answer]"
+      * Then respond with "{NO_QUESTIONS}" to exit the loop
+    
+    STEP 4: DETERMINE RESPONSE
+    - If the consolidated prompt is completely clear and has sufficient information:
+      * Respond EXACTLY with the string "{NO_QUESTIONS}"
+    - If the consolidated prompt still needs clarification AND we haven't reached max iterations:
+      * Formulate 1-3 specific, targeted questions to clarify remaining unclear aspects
+      * Focus on what's still ambiguous AFTER considering the consolidated prompt
+      * The questions should help pinpoint exactly what the user needs in terms of code implementation
+    - If we've reached max iterations but still have unclear aspects:
+      * Provide assumptions for unclear aspects in format: "assumption: [likeliest answer]"
+      * Then respond with "{NO_QUESTIONS}" to exit gracefully
+    
+    IMPORTANT: If you think the consolidated prompt doesn't make sense in the context of the project, explain why in your question and request clarification. The project might contain code that already satisfies, or partially satisfies the user's consolidated prompt.
     """,
-    tools=[read_file_content_tool],
+    tools=[read_file_content_tool, set_state_tool],
     output_key=STATE_QUESTIONS,
 )
 
@@ -317,17 +334,18 @@ context_formation_agent = create_rate_limited_agent(
     
     Compile a structured context that includes:
     1. The initial user's prompt (from '{STATE_USER_PROMPT}')
-    2. Relevant project structure information (from '{STATE_PROJECT_STRUCTURE}')
-    3. Key dependencies (from '{STATE_DEPENDENCIES}')
-    4. The most relevant code files and snippets (from '{STATE_RELEVANT_CODE}')
-    5. The most relevant test files (from '{STATE_RELEVANT_TESTS}')
-    6. Any clarifying questions and their answers (from '{STATE_QUESTIONS}' and '{STATE_ANSWERS}')
-    7. REALLY IMPORTANT: your summarization of the user's prompt, given the clarifying questions and their answers.
+    2. The consolidated prompt (from '{STATE_CONSOLIDATED_PROMPT}') - this is the final prompt incorporating all clarifications
+    3. Relevant project structure information (from '{STATE_PROJECT_STRUCTURE}')
+    4. Key dependencies (from '{STATE_DEPENDENCIES}')
+    5. The most relevant code files and snippets (from '{STATE_RELEVANT_CODE}')
+    6. The most relevant test files (from '{STATE_RELEVANT_TESTS}')
+    7. Any clarifying questions and their answers (from '{STATE_QUESTIONS}' and '{STATE_ANSWERS}')
+    8. REALLY IMPORTANT: your summarization of the consolidated prompt, which represents the final user intent
     
     Format your response as a well-structured context object with clear sections that a code
     generation LLM would find helpful for understanding what needs to be implemented.
     
-    IMPORTANT: The user's prompt is the initial prompt, and the summarization is the final prompt, given the clarifying questions and their answers.
+    IMPORTANT: The consolidated prompt from '{STATE_CONSOLIDATED_PROMPT}' is the primary source of truth for what the user wants, as it includes all clarifications and assumptions.
     """,
     output_key=STATE_FINAL_CONTEXT,
 )
