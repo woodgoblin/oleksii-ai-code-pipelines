@@ -1,4 +1,4 @@
-google-adk>=1.7.0
+google-adk>=1.8.0
 pytest>=8.4.1
 python-dotenv>=1.1.1
 pytest-asyncio>=1.0.0
