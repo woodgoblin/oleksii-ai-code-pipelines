@@ -52,8 +52,7 @@ from common.tools import (
 # Initialize MCP Server
 server = FastMCP(
     "CommonToolsServer",  # Updated name
-    version="0.1.0",
-    description="Provides common tools for project analysis and interaction for LLM agents.",
+    instructions="Provides common tools for project analysis and interaction for LLM agents.",
 )
 
 # --- Tool Definitions ---
