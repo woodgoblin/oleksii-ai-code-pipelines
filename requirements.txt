@@ -10,4 +10,4 @@ mcp[cli]==1.13.0
 gitignore-parser==0.1.12
 uvicorn==0.35.0
 fastapi==0.116.1
-protobuf==5.29.5
+protobuf==5.29.6
