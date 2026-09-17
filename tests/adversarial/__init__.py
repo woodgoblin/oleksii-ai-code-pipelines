@@ -1,0 +1,1 @@
+# Adversarial tests (rewrite package).

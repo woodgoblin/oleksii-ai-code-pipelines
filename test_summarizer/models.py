@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from enum import Enum
-from typing import Optional
+from typing import Literal, Optional
 
 from pydantic import BaseModel, ConfigDict, Field
 
@@ -121,7 +121,7 @@ class Delta(_ForbidExtra):
 
 
 class Snapshot(_ForbidExtra):
-    schema_version: int
+    schema_version: Literal[1]
     analyzed_repo: str
     git_commit: str = ""
     generated_at: str
