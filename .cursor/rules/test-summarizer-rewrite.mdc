@@ -1,0 +1,16 @@
+---
+description: Test summarizer rewrite contract — read PLAN.md, one phase, no ADK in new package
+alwaysApply: true
+---
+
+# Test summarizer rewrite
+
+`docs/test-summarizer/PLAN.md` is the contract. It wins over chat history and the architecture canvas.
+
+- Implement only in `test_summarizer/`. Leave `project_test_summarizer/` frozen.
+- No `google.adk` in the new package. CLI + files on disk, not `adk web`.
+- One PLAN phase per session. Do not skip ahead.
+- After edits: `python docs/test-summarizer/check_plan_invariants.py`
+- Do not edit `docs/test-summarizer/SCHEMA.md` unless the user asked for a `schema:` PR.
+- Role skills: `summarizer-conductor`, `summarizer-implement`, `summarizer-plan-check`, `summarizer-adversary`, `summarizer-review`.
+- GitHub: `gh-github` / `gh-open-pr`. `gh auth status` before push/PR; if unauthorized, ask the user and stop.

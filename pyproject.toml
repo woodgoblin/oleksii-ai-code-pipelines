@@ -82,7 +82,7 @@ markers = [
 ]
 
 [tool.coverage.run]
-source = ["common", "cursor_prompt_preprocessor", "potato_decison_with_human_in_the_loop", "project_test_summarizer"]
+source = ["common", "cursor_prompt_preprocessor", "potato_decison_with_human_in_the_loop", "project_test_summarizer", "test_summarizer"]
 omit = [
     "*/tests/*",
     "*/test_*",
