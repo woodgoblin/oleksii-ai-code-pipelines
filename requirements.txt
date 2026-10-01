@@ -2,7 +2,7 @@ google-adk==1.11.0
 pytest==8.4.1
 python-dotenv==1.1.1
 pytest-asyncio==1.1.0
-black==25.1.0
+black==26.3.1
 isort==6.0.1
 mypy==1.17.1
 google-genai==1.31.0
