@@ -1,0 +1,20 @@
+---
+description: New test_summarizer package — schema fields, no ADK, no glob lstrip
+globs: test_summarizer/**/*.py
+alwaysApply: false
+---
+
+# test_summarizer package
+
+Match `docs/test-summarizer/SCHEMA.md`. Store findings as `rule_id` + `severity`, never `meaningfulness_score`.
+
+```python
+# BAD
+from google.adk.agents import LlmAgent
+pattern.lstrip("**/")
+
+# GOOD
+# pathlib / git ls-files; glob patterns passed to Path.match or rg
+```
+
+Coverage XML is not a test extractor. LLM only via the batched client (phase 3+), never per-test agent turns.
